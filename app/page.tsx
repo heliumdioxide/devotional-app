@@ -1,146 +1,353 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
-type ChapterVerse = {
-  verse: number;
-  text: string;
+type VerseData = {
+  reference: string;
+  content: string;
+};
+
+type ApiVerseResponse = {
+  reference: string;
+  english: string;
+  chinese: string;
+  verseId?: string;
+  error?: string;
 };
 
 export default function Home() {
-  const [verse, setVerse] = useState("");
-  const [reference, setReference] = useState("");
+  const [english, setEnglish] = useState<VerseData | null>(null);
+  const [chinese, setChinese] = useState<VerseData | null>(null);
+  const [verseId, setVerseId] = useState<string>("");
+  const [chapterEnglish, setChapterEnglish] = useState<VerseData | null>(null);
+  const [chapterChinese, setChapterChinese] = useState<VerseData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [chapterVerses, setChapterVerses] = useState<ChapterVerse[]>([]);
   const [chapterLoading, setChapterLoading] = useState(false);
+  const [error, setError] = useState("");
   const [chapterError, setChapterError] = useState("");
+  const chapterRef = useRef<HTMLDivElement>(null);
 
-  const getVerse = async () => {
+  async function loadRandomVerse() {
     try {
       setLoading(true);
       setError("");
-      setChapterVerses([]);
+      setChapterEnglish(null);
+      setChapterChinese(null);
       setChapterError("");
 
-      const res = await fetch("https://bible-api.com/?random=verse");
-      if (!res.ok) {
-        throw new Error("Failed to fetch verse");
-      }
+      const res = await fetch(`/api/verse?t=${Date.now()}`, { cache: "no-store" });
+      const data: ApiVerseResponse = await res.json();
 
-      const data = await res.json();
-      setVerse(data.text?.trim() || "");
-      setReference(data.reference || "");
-    } catch {
-      setError("Something went wrong while fetching the verse.");
+      if (!res.ok) throw new Error(data.error || "Failed to load verse");
+
+      setEnglish({ reference: data.reference, content: data.english });
+      setChinese({ reference: data.reference, content: data.chinese });
+      setVerseId(data.verseId || "");
+    } catch (err: any) {
+      setError(err.message || "Failed to load verse");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const getChapterReference = () => {
-    if (!reference) return "";
-    return reference.split(":")[0];
-  };
-
-  const getFullChapter = async () => {
-    const chapterRef = getChapterReference();
-    if (!chapterRef) return;
-
+  async function loadFullChapter() {
+    if (!verseId) return;
     try {
       setChapterLoading(true);
       setChapterError("");
-      setChapterVerses([]);
 
-      const res = await fetch(
-        `https://bible-api.com/${encodeURIComponent(chapterRef)}`
-      );
+      const res = await fetch(`/api/chapter?verseId=${verseId}`, { cache: "no-store" });
+      const data: ApiVerseResponse = await res.json();
 
-      if (!res.ok) {
-        throw new Error("Failed to fetch chapter");
-      }
+      if (!res.ok) throw new Error(data.error || "Failed to load chapter");
 
-      const data = await res.json();
+      setChapterEnglish({ reference: data.reference, content: data.english });
+      setChapterChinese({ reference: data.reference, content: data.chinese });
 
-      setChapterVerses(
-        (data.verses || []).map((item: { verse: number; text: string }) => ({
-          verse: item.verse,
-          text: item.text.trim(),
-        }))
-      );
-    } catch {
-      setChapterError("Something went wrong while loading the chapter.");
+      setTimeout(() => {
+        chapterRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    } catch (err: any) {
+      setChapterError(err.message || "Failed to load chapter");
     } finally {
       setChapterLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    loadRandomVerse();
+  }, []);
 
   return (
-    <main className="min-h-screen bg-black text-white px-6 py-10">
-      <div className="mx-auto max-w-2xl space-y-6">
-        <div className="space-y-2 text-center">
-          <h1 className="text-3xl font-semibold">Daily Devotional</h1>
-          <p className="text-sm text-neutral-400">
-            Start with a verse, then go deeper into the chapter.
-          </p>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500&display=swap');
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+          background: #000;
+          color: #e8e0d0;
+          font-family: 'Inter', sans-serif;
+          min-height: 100vh;
+        }
+
+        .page {
+          max-width: 900px;
+          margin: 0 auto;
+          padding: 48px 20px 80px;
+        }
+
+        .header {
+          margin-bottom: 48px;
+          border-bottom: 1px solid #222;
+          padding-bottom: 24px;
+        }
+
+        .label {
+          font-size: 10px;
+          letter-spacing: 0.2em;
+          text-transform: uppercase;
+          color: #555;
+          margin-bottom: 8px;
+        }
+
+        .title {
+          font-family: 'Cormorant Garamond', serif;
+          font-size: clamp(28px, 6vw, 48px);
+          font-weight: 300;
+          color: #f0e8d8;
+          line-height: 1.1;
+        }
+
+        .new-verse-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 20px;
+          border: 1px solid #333;
+          background: transparent;
+          color: #888;
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          cursor: pointer;
+          transition: all 0.2s;
+          border-radius: 2px;
+          margin-bottom: 40px;
+        }
+
+        .new-verse-btn:hover:not(:disabled) {
+          border-color: #666;
+          color: #ccc;
+        }
+
+        .new-verse-btn:disabled {
+          opacity: 0.3;
+          cursor: not-allowed;
+        }
+
+        .spinner {
+          width: 12px;
+          height: 12px;
+          border: 1px solid #555;
+          border-top-color: #aaa;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .verse-reference {
+          font-family: 'Cormorant Garamond', serif;
+          font-size: clamp(20px, 4vw, 28px);
+          font-weight: 300;
+          font-style: italic;
+          color: #c8b89a;
+          margin-bottom: 24px;
+          letter-spacing: 0.02em;
+        }
+
+        .verse-section-label {
+          font-size: 10px;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: #444;
+          margin-bottom: 20px;
+        }
+
+        .columns {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 1px;
+          background: #1a1a1a;
+          border: 1px solid #1a1a1a;
+          border-radius: 4px;
+          overflow: hidden;
+          margin-bottom: 32px;
+        }
+
+        @media (max-width: 600px) {
+          .columns { grid-template-columns: 1fr; }
+        }
+
+        .col {
+          background: #0a0a0a;
+          padding: 28px 24px;
+        }
+
+        .col-label {
+          font-size: 10px;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          color: #444;
+          margin-bottom: 16px;
+        }
+
+        .verse-text {
+          font-family: 'Cormorant Garamond', serif;
+          font-size: clamp(17px, 2.5vw, 20px);
+          font-weight: 300;
+          line-height: 1.8;
+          color: #d0c8b8;
+          white-space: pre-wrap;
+        }
+
+        .chapter-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          padding: 14px 28px;
+          background: #0a0a0a;
+          border: 1px solid #2a2a2a;
+          color: #c8b89a;
+          font-family: 'Cormorant Garamond', serif;
+          font-size: 16px;
+          font-style: italic;
+          cursor: pointer;
+          transition: all 0.25s;
+          border-radius: 2px;
+          margin-bottom: 40px;
+        }
+
+        .chapter-btn:hover:not(:disabled) {
+          background: #111;
+          border-color: #444;
+          color: #e8d8b8;
+        }
+
+        .chapter-btn:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+
+        .chapter-arrow {
+          font-size: 18px;
+          transition: transform 0.2s;
+        }
+
+        .chapter-btn:hover .chapter-arrow {
+          transform: translateY(2px);
+        }
+
+        .divider {
+          border: none;
+          border-top: 1px solid #1a1a1a;
+          margin: 40px 0;
+        }
+
+        .chapter-reference {
+          font-family: 'Cormorant Garamond', serif;
+          font-size: clamp(18px, 3.5vw, 24px);
+          font-weight: 300;
+          font-style: italic;
+          color: #888;
+          margin-bottom: 24px;
+          letter-spacing: 0.02em;
+        }
+
+        .error {
+          color: #c0392b;
+          font-size: 13px;
+          margin-bottom: 16px;
+          padding: 12px 16px;
+          border: 1px solid #3a1a1a;
+          border-radius: 2px;
+          background: #0f0505;
+        }
+      `}</style>
+
+      <main className="page">
+        <div className="header">
+          <p className="label">Daily Reading</p>
+          <h1 className="title">Daily Devotional</h1>
         </div>
 
-        <div className="flex justify-center">
-          <button
-            onClick={getVerse}
-            disabled={loading}
-            className="rounded-2xl border border-white/20 px-5 py-3 transition hover:bg-white hover:text-black disabled:opacity-50"
-          >
-            {loading ? "Loading..." : "Get Random Verse"}
-          </button>
-        </div>
+        <button
+          onClick={loadRandomVerse}
+          disabled={loading}
+          className="new-verse-btn"
+        >
+          {loading ? <span className="spinner" /> : null}
+          {loading ? "Loading" : "↻ New verse"}
+        </button>
 
-        {error && <p className="text-center text-red-400">{error}</p>}
+        {error && <p className="error">{error}</p>}
 
-        {(verse || reference) && (
-          <div className="space-y-5 rounded-3xl border border-white/10 p-6">
-            <div className="space-y-3 text-center">
-              <p className="text-lg leading-8 whitespace-pre-line">{verse}</p>
-              <p className="text-sm text-neutral-400">{reference}</p>
+        {english && chinese && (
+          <>
+            <p className="verse-section-label">Today's verse</p>
+            <h2 className="verse-reference">{english.reference}</h2>
+
+            <div className="columns">
+              <div className="col">
+                <p className="col-label">English</p>
+                <p className="verse-text">{english.content}</p>
+              </div>
+              <div className="col">
+                <p className="col-label">繁體中文</p>
+                <p className="verse-text">{chinese.content}</p>
+              </div>
             </div>
 
-            <div className="flex justify-center">
+            {!chapterEnglish && (
               <button
-                onClick={getFullChapter}
+                onClick={loadFullChapter}
                 disabled={chapterLoading}
-                className="rounded-2xl border border-white/20 px-5 py-3 transition hover:bg-white hover:text-black disabled:opacity-50"
+                className="chapter-btn"
               >
-                {chapterLoading ? "Loading Chapter..." : "Read Full Chapter"}
+                {chapterLoading
+                  ? "Loading chapter..."
+                  : <>Read full chapter <span className="chapter-arrow">↓</span></>}
               </button>
-            </div>
-
-            {chapterError && (
-              <p className="text-center text-red-400">{chapterError}</p>
             )}
+          </>
+        )}
 
-            {chapterVerses.length > 0 && (
-              <div className="space-y-5 rounded-2xl border border-white/10 p-5 text-left">
-                <h2 className="text-xl font-semibold">
-                  {getChapterReference()}
-                </h2>
+        {chapterError && <p className="error">{chapterError}</p>}
 
-                <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-2">
-                  {chapterVerses.map((item) => (
-                    <div key={item.verse} className="flex items-start gap-4">
-                      <span className="w-6 shrink-0 pt-1 text-sm text-neutral-500">
-                        {item.verse}
-                      </span>
-                      <p className="text-base leading-8 text-neutral-100">
-                        {item.text}
-                      </p>
-                    </div>
-                  ))}
+        {chapterEnglish && chapterChinese && (
+          <>
+            <hr className="divider" />
+            <div ref={chapterRef}>
+              <p className="verse-section-label">Full chapter</p>
+              <h2 className="chapter-reference">{chapterEnglish.reference}</h2>
+
+              <div className="columns">
+                <div className="col">
+                  <p className="col-label">English</p>
+                  <p className="verse-text">{chapterEnglish.content}</p>
+                </div>
+                <div className="col">
+                  <p className="col-label">繁體中文</p>
+                  <p className="verse-text">{chapterChinese.content}</p>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          </>
         )}
-      </div>
-    </main>
+      </main>
+    </>
   );
 }
