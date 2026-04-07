@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import VerseReflection from "@/components/VerseReflection";
 
 type VerseData = {
   reference: string;
@@ -64,8 +65,6 @@ function parseChapterText(raw: string): Segment[] {
       const trimmed = line.trim();
       if (!trimmed) continue;
       if (verseText && !trimmed.startsWith("[")) {
-        // Lines ending with punctuation are continuations of the verse (e.g. benedictions),
-        // not section headings — append them back to the verse text
         if (/[.!?:;»"』」。！？、；：」』】〕]$/.test(trimmed)) {
           verseText += " " + trimmed;
         } else {
@@ -114,6 +113,42 @@ function ChapterContent({ segments }: { segments: Segment[] }) {
   );
 }
 
+const BOOK_NAME_MAP: Record<string, string> = {
+  "Genesis": "創世記", "Exodus": "出埃及記", "Leviticus": "利未記",
+  "Numbers": "民數記", "Deuteronomy": "申命記", "Joshua": "約書亞記",
+  "Judges": "士師記", "Ruth": "路得記", "1 Samuel": "撒母耳記上",
+  "2 Samuel": "撒母耳記下", "1 Kings": "列王紀上", "2 Kings": "列王紀下",
+  "1 Chronicles": "歷代志上", "2 Chronicles": "歷代志下", "Ezra": "以斯拉記",
+  "Nehemiah": "尼希米記", "Esther": "以斯帖記", "Job": "約伯記",
+  "Psalms": "詩篇", "Proverbs": "箴言", "Ecclesiastes": "傳道書",
+  "Song of Solomon": "雅歌", "Isaiah": "以賽亞書", "Jeremiah": "耶利米書",
+  "Lamentations": "耶利米哀歌", "Ezekiel": "以西結書", "Daniel": "但以理書",
+  "Hosea": "何西阿書", "Joel": "約珥書", "Amos": "阿摩司書",
+  "Obadiah": "俄巴底亞書", "Jonah": "約拿書", "Micah": "彌迦書",
+  "Nahum": "那鴻書", "Habakkuk": "哈巴谷書", "Zephaniah": "西番雅書",
+  "Haggai": "哈該書", "Zechariah": "撒迦利亞書", "Malachi": "瑪拉基書",
+  "Matthew": "馬太福音", "Mark": "馬可福音", "Luke": "路加福音",
+  "John": "約翰福音", "Acts": "使徒行傳", "Romans": "羅馬書",
+  "1 Corinthians": "哥林多前書", "2 Corinthians": "哥林多後書", "Galatians": "加拉太書",
+  "Ephesians": "以弗所書", "Philippians": "腓立比書", "Colossians": "歌羅西書",
+  "1 Thessalonians": "帖撒羅尼迦前書", "2 Thessalonians": "帖撒羅尼迦後書",
+  "1 Timothy": "提摩太前書", "2 Timothy": "提摩太後書", "Titus": "提多書",
+  "Philemon": "腓利門書", "Hebrews": "希伯來書", "James": "雅各書",
+  "1 Peter": "彼得前書", "2 Peter": "彼得後書", "1 John": "約翰一書",
+  "2 John": "約翰二書", "3 John": "約翰三書", "Jude": "猶大書",
+  "Revelation": "啟示錄",
+};
+
+function localizeReference(reference: string, isChinese: boolean): string {
+  if (!isChinese) return reference;
+  for (const [english, chinese] of Object.entries(BOOK_NAME_MAP)) {
+    if (reference.startsWith(english)) {
+      return reference.replace(english, chinese);
+    }
+  }
+  return reference;
+}
+
 export default function Home() {
   const [english, setEnglish] = useState<VerseData | null>(null);
   const [chinese, setChinese] = useState<VerseData | null>(null);
@@ -127,6 +162,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [chapterError, setChapterError] = useState("");
   const [language, setLanguage] = useState<Language>("both");
+  const [chapterOpened, setChapterOpened] = useState(false);
   const chapterRef = useRef<HTMLDivElement>(null);
 
   async function loadDailyVerse() {
@@ -138,6 +174,7 @@ export default function Home() {
       setEnglishSegments([]);
       setChineseSegments([]);
       setChapterError("");
+      setChapterOpened(false);
 
       const seed = getTodaySeed();
       const res = await fetch(`/api/verse?seed=${seed}`, { cache: "no-store" });
@@ -158,6 +195,7 @@ export default function Home() {
     if (!verseId) return;
     try {
       setChapterLoading(true);
+      setChapterOpened(true);
       setChapterError("");
 
       const res = await fetch(`/api/chapter?verseId=${verseId}`, { cache: "no-store" });
@@ -183,6 +221,7 @@ export default function Home() {
 
   const showEnglish = language === "english" || language === "both";
   const showChinese = language === "chinese" || language === "both";
+  const isChinese = language === "chinese";
 
   return (
     <>
@@ -383,7 +422,6 @@ export default function Home() {
           gap: 24px;
         }
 
-        /* True section headings — no trailing punctuation */
         .section-heading {
           font-family: 'Cormorant Garamond', serif;
           font-size: clamp(16px, 1.6vw, 20px);
@@ -459,12 +497,111 @@ export default function Home() {
           border-radius: 2px;
           background: #0f0505;
         }
+
+        /* ── Reflection styles ── */
+        .reflect-button {
+          margin-top: 0;
+          margin-bottom: 24px;
+          padding: 14px 28px;
+          background: transparent;
+          border: 1px solid #2a2a2a;
+          color: #c8b89a;
+          font-family: 'Cormorant Garamond', serif;
+          font-size: 17px;
+          font-style: italic;
+          letter-spacing: 0.02em;
+          cursor: pointer;
+          transition: all 0.25s;
+          border-radius: 2px;
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .reflect-button:hover { background: #111; border-color: #444; color: #e8d8b8; }
+
+        .reflection-loading {
+          display: flex;
+          gap: 6px;
+          align-items: center;
+          margin-bottom: 24px;
+          padding: 14px 0;
+        }
+        .loading-dot {
+          width: 6px;
+          height: 6px;
+          background: #c8b89a;
+          border-radius: 50%;
+          animation: pulse 1.2s ease-in-out infinite;
+          opacity: 0.3;
+        }
+        .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes pulse {
+          0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+          40% { opacity: 1; transform: scale(1); }
+        }
+
+        .reflection-card {
+          margin-bottom: 32px;
+          border: 1px solid #1e1e1e;
+          border-radius: 4px;
+          background: #0a0a0a;
+          padding: 32px 28px;
+          display: flex;
+          flex-direction: column;
+          gap: 28px;
+        }
+
+        .reflection-section h4 {
+          font-family: 'Inter', sans-serif;
+          color: #8a7050;
+          font-size: 9px;
+          font-weight: 500;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          margin-bottom: 10px;
+        }
+        .reflection-section p {
+          font-family: 'Cormorant Garamond', serif;
+          color: #c8c0b0;
+          font-size: clamp(16px, 2vw, 19px);
+          font-weight: 300;
+          line-height: 1.9;
+        }
+        .reflection-section.insight {
+          border-top: 1px solid #1c1c1c;
+          padding-top: 24px;
+        }
+        .reflection-section.insight p {
+          font-style: italic;
+          color: #a09080;
+        }
+
+        .reflect-reset {
+          background: none;
+          border: none;
+          color: #444;
+          font-family: 'Inter', sans-serif;
+          font-size: 10px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          cursor: pointer;
+          padding: 0;
+          margin-top: 4px;
+          transition: color 0.2s;
+        }
+        .reflect-reset:hover { color: #c8b89a; }
+        .reflection-error {
+          color: #c0392b;
+          font-size: 13px;
+          margin-bottom: 16px;
+        }
       `}</style>
 
       <main className="page">
         <div className="header">
-          <p className="label">Daily Reading</p>
-          <h1 className="title">Daily Devotional</h1>
+          <p className="label">{isChinese ? "每日靈修" : "Daily Reading"}</p>
+          <h1 className="title">{isChinese ? "每日靈修" : "Daily Devotional"}</h1>
         </div>
 
         <div className="lang-toggle">
@@ -483,19 +620,19 @@ export default function Home() {
 
         {loading && (
           <div className="loading-state">
-            <span className="spinner" /> Loading today's verse…
+            <span className="spinner" /> {isChinese ? "正在載入今日經文…" : "Loading today's verse…"}
           </div>
         )}
 
         {!loading && english && chinese && (
           <>
-            <p className="verse-section-label">Today's verse</p>
-            <h2 className="verse-reference">{english.reference}</h2>
+            <p className="verse-section-label">{isChinese ? "今日經文" : "Today's verse"}</p>
+            <h2 className="verse-reference">{localizeReference(english.reference, isChinese)}</h2>
 
             <div className={`verse-card ${language !== "both" ? "single" : ""}`}>
               {showEnglish && (
                 <div className="col">
-                  <p className="col-label">English</p>
+                  <p className="col-label">{isChinese ? "英文" : "English"}</p>
                   <p className="verse-text">{english.content}</p>
                 </div>
               )}
@@ -510,8 +647,8 @@ export default function Home() {
             {!chapterEnglish && (
               <button onClick={loadFullChapter} disabled={chapterLoading} className="chapter-btn">
                 {chapterLoading
-                  ? "Loading chapter..."
-                  : <><span>Read full chapter</span><span className="chapter-arrow">↓</span></>}
+                  ? (isChinese ? "載入中…" : "Loading chapter...")
+                  : <><span>{isChinese ? "閱讀完整章節" : "Read full chapter"}</span><span className="chapter-arrow">↓</span></>}
               </button>
             )}
           </>
@@ -523,13 +660,13 @@ export default function Home() {
           <>
             <hr className="divider" />
             <div ref={chapterRef}>
-              <p className="verse-section-label">Full chapter</p>
-              <h2 className="chapter-reference">{chapterEnglish.reference}</h2>
+              <p className="verse-section-label">{isChinese ? "完整章節" : "Full chapter"}</p>
+              <h2 className="chapter-reference">{localizeReference(chapterEnglish.reference, isChinese)}</h2>
 
               <div className={`chapter-grid ${language !== "both" ? "single" : ""}`}>
                 {showEnglish && (
                   <div>
-                    <p className="chapter-col-label">English</p>
+                    <p className="chapter-col-label">{isChinese ? "英文" : "English"}</p>
                     {englishSegments.length > 0
                       ? <ChapterContent segments={englishSegments} />
                       : <p className="chapter-plain">{chapterEnglish.content}</p>}
@@ -545,6 +682,17 @@ export default function Home() {
                 )}
               </div>
             </div>
+
+            <hr className="divider" />
+
+            <VerseReflection
+              verseReference={english!.reference}
+              verseTextEnglish={english!.content}
+              verseTextChinese={chinese!.content}
+              chapterTextEnglish={chapterEnglish.content}
+              chapterTextChinese={chapterChinese.content}
+              language={language}
+            />
           </>
         )}
       </main>
