@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
     "- \"insight\"：一個讓讀者沉澱的問題或短句反思。應像一位智慧的牧者結束講道時會說的話——不流於表面，不只是修辭，而是真正令人深思或被邀請進入的。（2-3句）",
     "",
     "語氣：溫暖、踏實、帶福音派色彩。避免陳腔濫調。具體優於抽象。",
+    "",
+    "CRITICAL: Return ONLY a raw JSON object. No markdown. No backticks. No preamble. Start your response with { and end with }",
   ].join("\n");
 
   const englishPrompt = [
@@ -32,7 +34,7 @@ export async function POST(req: NextRequest) {
     "Full chapter for context (English): " + chapterTextEnglish,
     "Full chapter for context (Chinese): " + chapterTextChinese,
     "",
-    "Respond ONLY with a valid JSON object (no markdown, no backticks) with exactly these four keys:",
+    "Respond ONLY with a valid JSON object with exactly these four keys:",
     "",
     "- \"observation\": What does the text literally say? Name the key characters, actions, and words. Note anything surprising, repeated, or structurally significant. Use the full chapter to understand where this verse sits and what weight it carries. (5-7 sentences)",
     "",
@@ -40,34 +42,47 @@ export async function POST(req: NextRequest) {
     "",
     "- \"application\": How does this passage press on a person today? Name a real tension or temptation it addresses. Be direct — not \"we should be more loving\" but what specifically this text asks a reader to reconsider or do differently. (4-5 sentences)",
     "",
-    "- \"insight\": A single probing question or short reflection to sit with. It should feel like something a wise pastor would close a sermon with — genuinely unsettling or inviting. (2-3 sentence)",
+    "- \"insight\": A single probing question or short reflection to sit with. It should feel like something a wise pastor would close a sermon with — genuinely unsettling or inviting. (2-3 sentences)",
     "",
-    "Tone: warm, grounded, Evangelicalism. Avoid clichés. Prefer concrete over abstract.",
+    "Tone: warm, grounded, Evangelical. Avoid clichés. Prefer concrete over abstract.",
+    "",
+    "CRITICAL: Return ONLY a raw JSON object. No markdown. No backticks. No preamble. Start your response with { and end with }",
   ].join("\n");
 
   const prompt = isChinese ? chinesePrompt : englishPrompt;
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "openrouter/auto",
-      max_tokens: 5000,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  const data = await response.json();
-
-  const raw = data.choices?.[0]?.message?.content ?? "";
-  const text = raw.replace(/```json|```/g, "").trim();
   try {
-    const parsed = JSON.parse(text);
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.0-flash-001",
+        max_tokens: 2000,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return NextResponse.json({ error: "OpenRouter error", detail: errText }, { status: 500 });
+    }
+
+    const data = await response.json();
+    const raw = data.choices?.[0]?.message?.content ?? "";
+
+    // Extract JSON even if the model wraps it in markdown
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return NextResponse.json({ error: "No JSON found in response", raw }, { status: 500 });
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
     return NextResponse.json(parsed);
-  } catch {
-    return NextResponse.json({ error: "Failed to parse reflection", raw: text, data }, { status: 500 });
+
+  } catch (err) {
+    return NextResponse.json({ error: "Reflection failed", detail: String(err) }, { status: 500 });
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import VerseReflection from "@/components/VerseReflection";
+import VerseReflection, { type VerseReflectionHandle } from "@/components/VerseReflection";
 
 type VerseData = {
   reference: string;
@@ -18,6 +18,7 @@ type ApiVerseResponse = {
   chinese: string;
   verseId?: string;
   reason?: string;
+  reasonZh?: string;
   error?: string;
 };
 
@@ -147,6 +148,7 @@ export default function Home() {
   const [chinese, setChinese] = useState<VerseData | null>(null);
   const [verseId, setVerseId] = useState<string>("");
   const [reason, setReason] = useState<string>("");
+  const [reasonZh, setReasonZh] = useState<string>("");
   const [chapterEnglish, setChapterEnglish] = useState<VerseData | null>(null);
   const [chapterChinese, setChapterChinese] = useState<VerseData | null>(null);
   const [englishSegments, setEnglishSegments] = useState<Segment[]>([]);
@@ -155,9 +157,14 @@ export default function Home() {
   const [chapterLoading, setChapterLoading] = useState(false);
   const [error, setError] = useState("");
   const [chapterError, setChapterError] = useState("");
-  const [language, setLanguage] = useState<Language>("both");
-  const [chapterOpened, setChapterOpened] = useState(false);
+  const [language, setLanguage] = useState<Language>("chinese");
+  const [reflectionTriggered, setReflectionTriggered] = useState(false);
+  const [reflectionLoading, setReflectionLoading] = useState(false);
+  const [firstAction, setFirstAction] = useState<"chapter" | "reflect" | null>(null);
+
   const chapterRef = useRef<HTMLDivElement>(null);
+  const reflectionRef = useRef<HTMLDivElement>(null);
+  const reflectionHandle = useRef<VerseReflectionHandle>(null);
 
   async function loadDailyVerse() {
     try {
@@ -168,8 +175,11 @@ export default function Home() {
       setEnglishSegments([]);
       setChineseSegments([]);
       setChapterError("");
-      setChapterOpened(false);
+      setReflectionTriggered(false);
+      setReflectionLoading(false);
+      setFirstAction(null);
       setReason("");
+      setReasonZh("");
 
       const res = await fetch(`/api/verse-of-the-day`, { cache: "no-store" });
       const data: ApiVerseResponse = await res.json();
@@ -179,6 +189,7 @@ export default function Home() {
       setChinese({ reference: data.reference, content: data.chinese });
       setVerseId(data.verseId || "");
       setReason(data.reason || "");
+      setReasonZh(data.reasonZh || data.reason || "");
     } catch (err: any) {
       setError(err.message || "Failed to load verse");
     } finally {
@@ -188,9 +199,9 @@ export default function Home() {
 
   async function loadFullChapter() {
     if (!verseId) return;
+    if (!firstAction) setFirstAction("chapter");
     try {
       setChapterLoading(true);
-      setChapterOpened(true);
       setChapterError("");
 
       const res = await fetch(`/api/chapter?verseId=${verseId}`, { cache: "no-store" });
@@ -212,11 +223,65 @@ export default function Home() {
     }
   }
 
+  function handleReflect() {
+    if (!firstAction) setFirstAction("reflect");
+    setReflectionTriggered(true);
+    setTimeout(() => {
+      reflectionHandle.current?.trigger();
+      reflectionRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
+  }
+
   useEffect(() => { loadDailyVerse(); }, []);
 
   const showEnglish = language === "english" || language === "both";
   const showChinese = language === "chinese" || language === "both";
   const isChinese = language === "chinese";
+  const verseReady = !loading && english && chinese;
+
+  const chapterBlock = chapterEnglish && chapterChinese ? (
+    <>
+      <hr className="divider" />
+      <div ref={chapterRef}>
+        <p className="verse-section-label">{isChinese ? "完整章節" : "Full chapter"}</p>
+        <h2 className="chapter-reference">{localizeReference(chapterEnglish.reference, isChinese)}</h2>
+        <div className={`chapter-grid ${language !== "both" ? "single" : ""}`}>
+          {showEnglish && (
+            <div>
+              <p className="chapter-col-label">{isChinese ? "英文" : "English"}</p>
+              {englishSegments.length > 0
+                ? <ChapterContent segments={englishSegments} />
+                : <p className="chapter-plain">{chapterEnglish.content}</p>}
+            </div>
+          )}
+          {showChinese && (
+            <div>
+              <p className="chapter-col-label">繁體中文</p>
+              {chineseSegments.length > 0
+                ? <ChapterContent segments={chineseSegments} />
+                : <p className="chapter-plain">{chapterChinese.content}</p>}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  ) : null;
+
+  const reflectionBlock = reflectionTriggered ? (
+    <div ref={reflectionRef}>
+      <hr className="divider" />
+      <VerseReflection
+        ref={reflectionHandle}
+        verseReference={english!.reference}
+        verseTextEnglish={english!.content}
+        verseTextChinese={chinese!.content}
+        chapterTextEnglish={chapterEnglish?.content ?? ""}
+        chapterTextChinese={chapterChinese?.content ?? ""}
+        language={language}
+        onLoadingChange={setReflectionLoading}
+      />
+    </div>
+  ) : null;
 
   return (
     <>
@@ -236,7 +301,7 @@ export default function Home() {
           width: 1100px;
           max-width: 100%;
           margin: 0 auto;
-          padding: 48px 32px 100px;
+          padding: 48px 32px 120px;
         }
 
         .header {
@@ -325,7 +390,7 @@ export default function Home() {
           background-color: #1a1a1a;
           border-radius: 4px;
           overflow: hidden;
-          margin-bottom: 32px;
+          margin-bottom: 48px;
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 1px;
@@ -359,27 +424,61 @@ export default function Home() {
           color: #d8d0c0;
         }
 
-        .chapter-btn {
+        .sticky-bar {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          z-index: 100;
+          background: rgba(0, 0, 0, 0.92);
+          backdrop-filter: blur(12px);
+          border-top: 1px solid #1e1e1e;
+          padding: 14px 32px;
+        }
+
+        .sticky-bar-inner {
+          width: 1100px;
+          max-width: 100%;
+          margin: 0 auto;
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+
+        .sticky-btn {
+          flex: 1;
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 10px;
-          padding: 14px 28px;
-          background: #0a0a0a;
-          border: 1px solid #2a2a2a;
-          color: #c8b89a;
+          padding: 13px 24px;
           font-family: 'Cormorant Garamond', serif;
           font-size: 17px;
           font-style: italic;
           cursor: pointer;
           transition: all 0.25s;
           border-radius: 2px;
-          margin-bottom: 40px;
+          white-space: nowrap;
         }
 
-        .chapter-btn:hover:not(:disabled) { background: #111; border-color: #444; color: #e8d8b8; }
-        .chapter-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .sticky-btn-chapter {
+          background: #0a0a0a;
+          border: 1px solid #2a2a2a;
+          color: #c8b89a;
+        }
+        .sticky-btn-chapter:hover:not(:disabled) { background: #111; border-color: #444; color: #e8d8b8; }
+        .sticky-btn-chapter:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .sticky-btn-reflect {
+          background: #13110e;
+          border: 1px solid #3a2e1e;
+          color: #c8b89a;
+        }
+        .sticky-btn-reflect:hover:not(:disabled) { background: #1a1510; border-color: #5a4a2e; color: #e8d8b8; }
+        .sticky-btn-reflect:disabled { opacity: 0.4; cursor: not-allowed; }
+
         .chapter-arrow { font-size: 18px; transition: transform 0.2s; }
-        .chapter-btn:hover .chapter-arrow { transform: translateY(2px); }
+        .sticky-btn-chapter:hover .chapter-arrow { transform: translateY(2px); }
 
         .divider {
           border: none;
@@ -502,32 +601,11 @@ export default function Home() {
           background: #0f0505;
         }
 
-        .reflect-button {
-          margin-top: 0;
-          margin-bottom: 24px;
-          padding: 14px 28px;
-          background: transparent;
-          border: 1px solid #2a2a2a;
-          color: #c8b89a;
-          font-family: 'Cormorant Garamond', serif;
-          font-size: 17px;
-          font-style: italic;
-          letter-spacing: 0.02em;
-          cursor: pointer;
-          transition: all 0.25s;
-          border-radius: 2px;
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .reflect-button:hover { background: #111; border-color: #444; color: #e8d8b8; }
-
         .reflection-loading {
           display: flex;
           gap: 6px;
           align-items: center;
-          margin-bottom: 24px;
-          padding: 14px 0;
+          padding: 32px 0;
         }
         .loading-dot {
           width: 6px;
@@ -580,24 +658,15 @@ export default function Home() {
           color: #a09080;
         }
 
-        .reflect-reset {
-          background: none;
-          border: none;
-          color: #444;
-          font-family: 'Inter', sans-serif;
-          font-size: 10px;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          cursor: pointer;
-          padding: 0;
-          margin-top: 4px;
-          transition: color 0.2s;
-        }
-        .reflect-reset:hover { color: #c8b89a; }
         .reflection-error {
           color: #c0392b;
           font-size: 13px;
           margin-bottom: 16px;
+        }
+
+        @media (max-width: 500px) {
+          .sticky-bar { padding: 12px 16px; }
+          .sticky-btn { font-size: 15px; padding: 12px 16px; }
         }
       `}</style>
 
@@ -608,14 +677,14 @@ export default function Home() {
         </div>
 
         <div className="lang-toggle">
-          <button className={`lang-btn ${language === "english" ? "active" : ""}`} onClick={() => setLanguage("english")}>
-            English
+          <button className={`lang-btn ${language === "chinese" ? "active" : ""}`} onClick={() => setLanguage("chinese")}>
+            中文
           </button>
           <button className={`lang-btn ${language === "both" ? "active" : ""}`} onClick={() => setLanguage("both")}>
             Both
           </button>
-          <button className={`lang-btn ${language === "chinese" ? "active" : ""}`} onClick={() => setLanguage("chinese")}>
-            中文
+          <button className={`lang-btn ${language === "english" ? "active" : ""}`} onClick={() => setLanguage("english")}>
+            English
           </button>
         </div>
 
@@ -627,82 +696,75 @@ export default function Home() {
           </div>
         )}
 
-        {!loading && english && chinese && (
+        {verseReady && (
           <>
             <p className="verse-section-label">{isChinese ? "今日經文" : "Today's verse"}</p>
-            <h2 className="verse-reference">{localizeReference(english.reference, isChinese)}</h2>
+            <h2 className="verse-reference">{localizeReference(english!.reference, isChinese)}</h2>
 
-            {reason && (
-              <p className="verse-reason">{reason}</p>
+            {(reason || reasonZh) && (
+              <p className="verse-reason">{isChinese ? (reasonZh || reason) : reason}</p>
             )}
 
             <div className={`verse-card ${language !== "both" ? "single" : ""}`}>
               {showEnglish && (
                 <div className="col">
                   <p className="col-label">{isChinese ? "英文" : "English"}</p>
-                  <p className="verse-text">{english.content}</p>
+                  <p className="verse-text">{english!.content}</p>
                 </div>
               )}
               {showChinese && (
                 <div className="col">
                   <p className="col-label">繁體中文</p>
-                  <p className="verse-text">{chinese.content}</p>
+                  <p className="verse-text">{chinese!.content}</p>
                 </div>
               )}
             </div>
 
-            {!chapterEnglish && (
-              <button onClick={loadFullChapter} disabled={chapterLoading} className="chapter-btn">
-                {chapterLoading
-                  ? (isChinese ? "載入中…" : "Loading chapter...")
-                  : <><span>{isChinese ? "閱讀完整章節" : "Read full chapter"}</span><span className="chapter-arrow">↓</span></>}
-              </button>
+            {/* Render in click order */}
+            {firstAction === "reflect" ? (
+              <>
+                {reflectionBlock}
+                {chapterBlock}
+              </>
+            ) : (
+              <>
+                {chapterBlock}
+                {reflectionBlock}
+              </>
             )}
-          </>
-        )}
 
-        {chapterError && <p className="error">{chapterError}</p>}
-
-        {chapterEnglish && chapterChinese && (
-          <>
-            <hr className="divider" />
-            <div ref={chapterRef}>
-              <p className="verse-section-label">{isChinese ? "完整章節" : "Full chapter"}</p>
-              <h2 className="chapter-reference">{localizeReference(chapterEnglish.reference, isChinese)}</h2>
-
-              <div className={`chapter-grid ${language !== "both" ? "single" : ""}`}>
-                {showEnglish && (
-                  <div>
-                    <p className="chapter-col-label">{isChinese ? "英文" : "English"}</p>
-                    {englishSegments.length > 0
-                      ? <ChapterContent segments={englishSegments} />
-                      : <p className="chapter-plain">{chapterEnglish.content}</p>}
-                  </div>
-                )}
-                {showChinese && (
-                  <div>
-                    <p className="chapter-col-label">繁體中文</p>
-                    {chineseSegments.length > 0
-                      ? <ChapterContent segments={chineseSegments} />
-                      : <p className="chapter-plain">{chapterChinese.content}</p>}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <hr className="divider" />
-
-            <VerseReflection
-              verseReference={english!.reference}
-              verseTextEnglish={english!.content}
-              verseTextChinese={chinese!.content}
-              chapterTextEnglish={chapterEnglish.content}
-              chapterTextChinese={chapterChinese.content}
-              language={language}
-            />
+            {chapterError && <p className="error">{chapterError}</p>}
           </>
         )}
       </main>
+
+      {/* Sticky bar — hides once both actions are done */}
+      {verseReady && (!reflectionTriggered || !chapterEnglish) && (
+        <div className="sticky-bar">
+          <div className="sticky-bar-inner">
+            {!chapterEnglish && (
+              <button
+                onClick={loadFullChapter}
+                disabled={chapterLoading}
+                className="sticky-btn sticky-btn-chapter"
+              >
+                {chapterLoading
+                  ? <><span className="spinner" /> {isChinese ? "載入中…" : "Loading…"}</>
+                  : <><span>{isChinese ? "閱讀完整章節" : "Read full chapter"}</span><span className="chapter-arrow">↓</span></>
+                }
+              </button>
+            )}
+            {!reflectionTriggered && (
+              <button
+                onClick={handleReflect}
+                className="sticky-btn sticky-btn-reflect"
+              >
+                ✦ {isChinese ? "靈修默想" : "Reflect"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

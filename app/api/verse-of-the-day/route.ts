@@ -6,6 +6,26 @@ const API_KEY = process.env.API_BIBLE_KEY?.trim() || "";
 const EN_BIBLE_ID = process.env.API_BIBLE_EN?.trim() || "";
 const ZH_BIBLE_ID = "a6e06d2c5b90ad89-01";
 
+const VALID_BOOK_CODES = new Set([
+  "GEN","EXO","LEV","NUM","DEU","JOS","JDG","RUT","1SA","2SA","1KI","2KI",
+  "1CH","2CH","EZR","NEH","EST","JOB","PSA","PRO","ECC","SNG","ISA","JER",
+  "LAM","EZK","DAN","HOS","JOL","AMO","OBA","JON","MIC","NAM","HAB","ZEP",
+  "HAG","ZEC","MAL","MAT","MRK","LUK","JHN","ACT","ROM","1CO","2CO","GAL",
+  "EPH","PHP","COL","1TH","2TH","1TI","2TI","TIT","PHM","HEB","JAS","1PE",
+  "2PE","1JN","2JN","3JN","JUD","REV"
+]);
+
+function isValidVerseId(verseId: string): boolean {
+  if (!verseId || typeof verseId !== "string") return false;
+  const parts = verseId.split(".");
+  if (parts.length !== 3) return false;
+  const [book, chapter, verse] = parts;
+  if (!VALID_BOOK_CODES.has(book)) return false;
+  if (isNaN(Number(chapter)) || isNaN(Number(verse))) return false;
+  if (Number(chapter) < 1 || Number(verse) < 1) return false;
+  return true;
+}
+
 async function fetchWithKey(url: string) {
   return fetch(url, {
     method: "GET",
@@ -47,7 +67,6 @@ function getSeasonContext(date: Date): string {
     (date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / 86400000
   );
 
-  // Key evangelical dates take priority
   if (month === 12 && day === 25) return "Christmas Day — the incarnation of Jesus Christ";
   if (month === 1 && day === 1) return "New Year's Day — new beginnings under God's sovereignty";
   if (month === 10 && day === 31) return "Reformation Day — Scripture alone, grace alone, faith alone";
@@ -89,31 +108,28 @@ function getSeasonContext(date: Date): string {
   ].join(" ");
 }
 
-export async function GET() {
-  if (!API_KEY || !EN_BIBLE_ID) {
-    return NextResponse.json({ error: "Missing API keys" }, { status: 500 });
-  }
-
-  const today = new Date();
-  const dateKey = today.toISOString().split("T")[0];
-  const seasonContext = getSeasonContext(today);
-
+async function getVerseFromAI(dateKey: string, seasonContext: string, attempt: number = 1): Promise<{ verseId: string; reason: string; reasonZh: string }> {
   const prompt = [
     "You are a thoughtful evangelical pastor selecting today's verse of the day.",
     "",
     `Today is ${dateKey}. The occasion is: ${seasonContext}`,
-    "",
+    attempt > 1 ? `\nNote: Your previous suggestion failed validation. Please pick a different, well-known verse.\n` : "",
     "Select ONE Bible verse that is deeply fitting for this occasion from an evangelical perspective.",
     "Ground your choice in the authority of Scripture, the gospel of Jesus Christ, and practical discipleship.",
     "",
     "Respond ONLY with a valid JSON object (no markdown, no backticks) with exactly these keys:",
     "",
     '- "verseId": the verse in API.Bible format e.g. "ROM.8.28" or "PSA.23.1"',
-    '- "reason": one sentence explaining why this verse fits today (warm, pastoral, evangelical)',
+    '- "reason_en": one sentence in English explaining why this verse fits today (warm, pastoral, evangelical)',
+    '- "reason_zh": one sentence in Traditional Chinese (繁體中文) explaining why this verse fits today (warm, pastoral, evangelical)',
     "",
-    "Book codes: GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV",
+    "CRITICAL: Use ONLY these exact book codes (case-sensitive):",
+    "GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV",
     "",
+    "Format MUST be BOOK.CHAPTER.VERSE with dots, e.g. JHN.3.16 or PSA.23.1",
     "Choose a verse substantial enough to stand alone — avoid very short verses that lose meaning without context.",
+    "",
+    "CRITICAL: Return ONLY a raw JSON object. No markdown. No backticks. Start with { and end with }",
   ].join("\n");
 
   const aiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -123,43 +139,78 @@ export async function GET() {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "openrouter/auto",
-      max_tokens: 200,
+      model: "google/gemini-2.0-flash-001",
+      max_tokens: 300,
       messages: [{ role: "user", content: prompt }],
     }),
   });
 
   const aiData = await aiRes.json();
   const raw = aiData.choices?.[0]?.message?.content ?? "";
-  const cleaned = raw.replace(/```json|```/g, "").trim();
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error(`No JSON in AI response: ${raw}`);
+  const parsed = JSON.parse(jsonMatch[0]);
 
-  let verseId: string;
-  let reason: string;
+  return {
+    verseId: parsed.verseId,
+    reason: parsed.reason_en || parsed.reason || "",
+    reasonZh: parsed.reason_zh || parsed.reason_en || parsed.reason || "",
+  };
+}
 
-  try {
-    const parsed = JSON.parse(cleaned);
-    verseId = parsed.verseId;
-    reason = parsed.reason;
-  } catch {
-    return NextResponse.json({ error: "AI parse failed", raw }, { status: 500 });
+export async function GET() {
+  if (!API_KEY || !EN_BIBLE_ID) {
+    return NextResponse.json({ error: "Missing API keys" }, { status: 500 });
   }
 
-  try {
-    const [english, chinese] = await Promise.all([
-      fetchVerse(EN_BIBLE_ID, verseId),
-      fetchVerse(ZH_BIBLE_ID, verseId),
-    ]);
+  const today = new Date();
+  const dateKey = today.toISOString().split("T")[0];
+  const seasonContext = getSeasonContext(today);
 
-    return NextResponse.json({
-      reference: english.reference,
-      english: english.content,
-      chinese: chinese.content,
-      verseId,
-      reason,
-      season: seasonContext,
-      date: dateKey,
-    });
-  } catch (err) {
-    return NextResponse.json({ error: "Verse fetch failed", verseId, detail: String(err) }, { status: 500 });
+  const MAX_ATTEMPTS = 3;
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let verseId: string;
+    let reason: string;
+    let reasonZh: string;
+
+    try {
+      ({ verseId, reason, reasonZh } = await getVerseFromAI(dateKey, seasonContext, attempt));
+    } catch (err) {
+      return NextResponse.json({ error: "AI parse failed", detail: String(err) }, { status: 500 });
+    }
+
+    if (!isValidVerseId(verseId)) {
+      lastError = `Invalid verseId format: "${verseId}"`;
+      console.warn(`[verse-of-the-day] Attempt ${attempt}: ${lastError}`);
+      continue;
+    }
+
+    try {
+      const [english, chinese] = await Promise.all([
+        fetchVerse(EN_BIBLE_ID, verseId),
+        fetchVerse(ZH_BIBLE_ID, verseId),
+      ]);
+
+      return NextResponse.json({
+        reference: english.reference,
+        english: english.content,
+        chinese: chinese.content,
+        verseId,
+        reason,
+        reasonZh,
+        season: seasonContext,
+        date: dateKey,
+      });
+    } catch (err) {
+      lastError = String(err);
+      console.warn(`[verse-of-the-day] Attempt ${attempt}: Verse fetch failed for "${verseId}": ${lastError}`);
+    }
   }
+
+  return NextResponse.json(
+    { error: "Failed after 3 attempts", detail: lastError },
+    { status: 500 }
+  );
 }
