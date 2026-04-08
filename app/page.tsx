@@ -17,6 +17,7 @@ type ApiVerseResponse = {
   english: string;
   chinese: string;
   verseId?: string;
+  reason?: string;
   error?: string;
 };
 
@@ -30,14 +31,6 @@ type ApiChapterResponse = {
 };
 
 type Language = "english" | "chinese" | "both";
-
-function getTodaySeed(): number {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return parseInt(`${y}${m}${d}`, 10);
-}
 
 function parseChapterText(raw: string): Segment[] {
   const segments: Segment[] = [];
@@ -153,6 +146,7 @@ export default function Home() {
   const [english, setEnglish] = useState<VerseData | null>(null);
   const [chinese, setChinese] = useState<VerseData | null>(null);
   const [verseId, setVerseId] = useState<string>("");
+  const [reason, setReason] = useState<string>("");
   const [chapterEnglish, setChapterEnglish] = useState<VerseData | null>(null);
   const [chapterChinese, setChapterChinese] = useState<VerseData | null>(null);
   const [englishSegments, setEnglishSegments] = useState<Segment[]>([]);
@@ -175,15 +169,16 @@ export default function Home() {
       setChineseSegments([]);
       setChapterError("");
       setChapterOpened(false);
+      setReason("");
 
-      const seed = getTodaySeed();
-      const res = await fetch(`/api/verse?seed=${seed}`, { cache: "no-store" });
+      const res = await fetch(`/api/verse-of-the-day`, { cache: "no-store" });
       const data: ApiVerseResponse = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load verse");
 
       setEnglish({ reference: data.reference, content: data.english });
       setChinese({ reference: data.reference, content: data.chinese });
       setVerseId(data.verseId || "");
+      setReason(data.reason || "");
     } catch (err: any) {
       setError(err.message || "Failed to load verse");
     } finally {
@@ -313,8 +308,17 @@ export default function Home() {
           font-weight: 300;
           font-style: italic;
           color: #c8b89a;
-          margin-bottom: 24px;
+          margin-bottom: 16px;
           letter-spacing: 0.02em;
+        }
+
+        .verse-reason {
+          font-family: 'Cormorant Garamond', serif;
+          font-style: italic;
+          color: #7a6a50;
+          font-size: clamp(14px, 1.8vw, 17px);
+          margin-bottom: 24px;
+          line-height: 1.7;
         }
 
         .verse-card {
@@ -498,7 +502,6 @@ export default function Home() {
           background: #0f0505;
         }
 
-        /* ── Reflection styles ── */
         .reflect-button {
           margin-top: 0;
           margin-bottom: 24px;
@@ -628,6 +631,10 @@ export default function Home() {
           <>
             <p className="verse-section-label">{isChinese ? "今日經文" : "Today's verse"}</p>
             <h2 className="verse-reference">{localizeReference(english.reference, isChinese)}</h2>
+
+            {reason && (
+              <p className="verse-reason">{reason}</p>
+            )}
 
             <div className={`verse-card ${language !== "both" ? "single" : ""}`}>
               {showEnglish && (
