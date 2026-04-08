@@ -121,7 +121,7 @@ async function getVerseFromAI(dateKey: string, seasonContext: string, attempt: n
     "",
     '- "verseId": the verse in API.Bible format e.g. "ROM.8.28" or "PSA.23.1"',
     '- "reason_en": one sentence in English explaining why this verse fits today (warm, pastoral, evangelical)',
-    '- "reason_zh": one sentence in Traditional Chinese (繁體中文) explaining why this verse fits today (warm, pastoral, evangelical)',
+    '- "reason_zh": one sentence in Traditional Chinese (繁體中文, NOT Simplified Chinese 簡體中文) explaining why this verse fits today (warm, pastoral, evangelical). Use Traditional Chinese characters only — e.g. 這、來、說、愛、時、會.',
     "",
     "CRITICAL: Use ONLY these exact book codes (case-sensitive):",
     "GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV",
