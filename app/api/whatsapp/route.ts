@@ -53,6 +53,10 @@ export async function POST(req: NextRequest) {
     const verseData = await verseRes.json();
     const { reference, english, chinese, verseId } = verseData;
 
+    // Fetch full chapter for reflection context
+    const chapterRes = await fetch(`${baseUrl}/api/chapter?verseId=${verseId}`, { cache: 'no-store' });
+    const chapterData = await chapterRes.json();
+
     const reflectRes = await fetch(`${baseUrl}/api/reflect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -60,8 +64,8 @@ export async function POST(req: NextRequest) {
         verseReference: reference,
         verseTextEnglish: english,
         verseTextChinese: chinese,
-        chapterTextEnglish: '',
-        chapterTextChinese: '',
+        chapterTextEnglish: chapterData.english ?? '',
+        chapterTextChinese: chapterData.chinese ?? '',
         language: lang === 'zh' ? 'chinese' : lang === 'both' ? 'both' : 'english',
       }),
     });
