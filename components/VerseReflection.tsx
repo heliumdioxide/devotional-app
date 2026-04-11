@@ -5,10 +5,9 @@ import { useState, useImperativeHandle, forwardRef } from "react";
 type Language = "english" | "chinese" | "both";
 
 type Reflection = {
-  observation: string;
-  interpretation: string;
-  application: string;
-  insight: string;
+  keyVerse: string;
+  insights: string[];
+  reflection: string;
 };
 
 type Props = {
@@ -65,7 +64,16 @@ const VerseReflection = forwardRef<VerseReflectionHandle, Props>(function VerseR
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
-      setReflection(data);
+      const insights = Array.isArray(data.insights)
+        ? data.insights
+        : typeof data.insights === "string"
+          ? [data.insights]
+          : [];
+      setReflection({
+        keyVerse: String(data.keyVerse ?? ""),
+        insights,
+        reflection: String(data.reflection ?? ""),
+      });
     } catch (err: any) {
       setError(err.message || "Failed to load reflection");
     } finally {
@@ -80,8 +88,8 @@ const VerseReflection = forwardRef<VerseReflectionHandle, Props>(function VerseR
   }));
 
   const labels = isChinese
-    ? { observation: "觀察", interpretation: "解釋", application: "應用", insight: "反思" }
-    : { observation: "Observation", interpretation: "Interpretation", application: "Application", insight: "Insight" };
+    ? { keyVerse: "關鍵經文", insights: "亮點", reflection: "反思" }
+    : { keyVerse: "Key verse", insights: "Insights", reflection: "Reflection" };
 
   if (!triggered) return null;
 
@@ -104,20 +112,20 @@ const VerseReflection = forwardRef<VerseReflectionHandle, Props>(function VerseR
   return (
     <div className="reflection-card">
       <div className="reflection-section">
-        <h4>{labels.observation}</h4>
-        <p>{reflection.observation}</p>
+        <h4>{labels.keyVerse}</h4>
+        <p>{reflection.keyVerse}</p>
       </div>
       <div className="reflection-section">
-        <h4>{labels.interpretation}</h4>
-        <p>{reflection.interpretation}</p>
-      </div>
-      <div className="reflection-section">
-        <h4>{labels.application}</h4>
-        <p>{reflection.application}</p>
+        <h4>{labels.insights}</h4>
+        <ul className="reflection-insights">
+          {reflection.insights.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
       </div>
       <div className="reflection-section insight">
-        <h4>{labels.insight}</h4>
-        <p>{reflection.insight}</p>
+        <h4>{labels.reflection}</h4>
+        <p>{reflection.reflection}</p>
       </div>
     </div>
   );

@@ -73,13 +73,14 @@ export async function POST(req: NextRequest) {
 
     const verseMsg = `📖 *${reference}*\n\n${english}`;
 
-    const msg2 =
-      `*Observation*\n${reflectData.observation}\n\n` +
-      `*Interpretation*\n${reflectData.interpretation}`;
+    const insightsLines = Array.isArray(reflectData.insights)
+      ? reflectData.insights.map((s: string) => `• ${s}`).join('\n')
+      : String(reflectData.insights ?? '');
 
-    const msg3 =
-      `*Application*\n${reflectData.application}\n\n` +
-      `*Insight*\n${reflectData.insight}`;
+    const msg2 =
+      `*Key verse*\n${reflectData.keyVerse}\n\n` + `*Insights*\n${insightsLines}`;
+
+    const msg3 = `*Reflection*\n${reflectData.reflection}`;
 
     await sendWhatsApp(from, verseMsg);
     await sendWhatsApp(from, msg2);

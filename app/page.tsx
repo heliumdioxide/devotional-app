@@ -649,6 +649,21 @@ export default function Home() {
           font-weight: 300;
           line-height: 1.9;
         }
+        .reflection-insights {
+          margin: 0;
+          padding-left: 1.25em;
+          font-family: 'Cormorant Garamond', serif;
+          color: #c8c0b0;
+          font-size: clamp(16px, 2vw, 19px);
+          font-weight: 300;
+          line-height: 1.9;
+        }
+        .reflection-insights li {
+          margin-bottom: 0.65em;
+        }
+        .reflection-insights li:last-child {
+          margin-bottom: 0;
+        }
         .reflection-section.insight {
           border-top: 1px solid #1c1c1c;
           padding-top: 24px;
