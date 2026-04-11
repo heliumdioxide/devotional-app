@@ -1,0 +1,101 @@
+import { NextRequest, NextResponse } from 'next/server';
+import twilio from 'twilio';
+
+export const dynamic = 'force-dynamic';
+
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID!,
+  process.env.TWILIO_AUTH_TOKEN!
+);
+
+const FROM = `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`;
+
+// In-memory language preference (resets on redeploy — good enough for MVP)
+const userLang: Record<string, 'en' | 'zh' | 'both'> = {};
+
+async function sendWhatsApp(to: string, body: string) {
+  await twilioClient.messages.create({ from: FROM, to, body });
+}
+
+function detectLang(msg: string): 'en' | 'zh' | 'both' | null {
+  const m = msg.trim().toLowerCase();
+  if (m === 'english') return 'en';
+  if (m === '中文') return 'zh';
+  if (m === 'both') return 'both';
+  return null;
+}
+
+export async function POST(req: NextRequest) {
+  const formData = await req.formData();
+  const from = formData.get('From') as string;
+  const body = (formData.get('Body') as string) ?? '';
+
+  // Detect language switch commands
+  const langSwitch = detectLang(body);
+  if (langSwitch) {
+    userLang[from] = langSwitch;
+    const confirmations = {
+      en: 'Got it! I\'ll reply in English from now on.',
+      zh: '好的！我會用繁體中文回覆你。',
+      both: 'Got it! I\'ll reply in both English and Traditional Chinese.',
+    };
+    await sendWhatsApp(from, confirmations[langSwitch]);
+    return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
+      headers: { 'Content-Type': 'text/xml' },
+    });
+  }
+
+  // Send instant acknowledgement
+  await sendWhatsApp(from, '🙏 Fetching today\'s verse...');
+
+  const lang = userLang[from] ?? 'en';
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+
+  try {
+    // Fetch verse of the day
+    const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, { cache: 'no-store' });
+    const verseData = await verseRes.json();
+    const { reference, text, chapterReference } = verseData;
+
+    // Fetch OIA reflection
+    const reflectRes = await fetch(`${baseUrl}/api/reflect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reference, text }),
+    });
+    const reflectData = await reflectRes.json();
+
+    // Format message based on language
+    const messages: string[] = [];
+
+    if (lang === 'en' || lang === 'both') {
+      messages.push(
+        `📖 *${reference}*\n\n${text}\n\n` +
+        `*Observation*\n${reflectData.observation_en}\n\n` +
+        `*Interpretation*\n${reflectData.interpretation_en}\n\n` +
+        `*Application*\n${reflectData.application_en}`
+      );
+    }
+
+    if (lang === 'zh' || lang === 'both') {
+      messages.push(
+        `📖 *${reference}*\n\n${reflectData.verse_zh ?? text}\n\n` +
+        `*觀察*\n${reflectData.observation_zh}\n\n` +
+        `*詮釋*\n${reflectData.interpretation_zh}\n\n` +
+        `*應用*\n${reflectData.application_zh}`
+      );
+    }
+
+    for (const msg of messages) {
+      await sendWhatsApp(from, msg);
+    }
+
+  } catch (err) {
+    console.error('WhatsApp bot error:', err);
+    await sendWhatsApp(from, 'Sorry, something went wrong. Please try again in a moment.');
+  }
+
+  return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
+    headers: { 'Content-Type': 'text/xml' },
+  });
+}
