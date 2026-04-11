@@ -51,15 +51,15 @@ export async function POST(req: NextRequest) {
   try {
     const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, { cache: 'no-store' });
     const verseData = await verseRes.json();
-    const { reference, text } = verseData;
+    const { reference, english, chinese, verseId } = verseData;
 
     const reflectRes = await fetch(`${baseUrl}/api/reflect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         verseReference: reference,
-        verseTextEnglish: text,
-        verseTextChinese: '',
+        verseTextEnglish: english,
+        verseTextChinese: chinese,
         chapterTextEnglish: '',
         chapterTextChinese: '',
         language: lang === 'zh' ? 'chinese' : lang === 'both' ? 'both' : 'english',
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     const reflectData = await reflectRes.json();
 
     const msg =
-      `📖 *${reference}*\n\n${text}\n\n` +
+      `📖 *${reference}*\n\n${english}\n\n` +
       `*Observation*\n${reflectData.observation}\n\n` +
       `*Interpretation*\n${reflectData.interpretation}\n\n` +
       `*Application*\n${reflectData.application}\n\n` +
@@ -79,8 +79,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('WhatsApp bot error:', err);
     await sendWhatsApp(from, 'Sorry, something went wrong. Please try again in a moment.');
-  }
-
+  };
   return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
     headers: { 'Content-Type': 'text/xml' },
   });
