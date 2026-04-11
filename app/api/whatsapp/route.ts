@@ -73,14 +73,17 @@ export async function POST(req: NextRequest) {
 
     const verseMsg = `📖 *${reference}*\n\n${english}`;
 
-    const reflectionMsg =
+    const msg2 =
       `*Observation*\n${reflectData.observation}\n\n` +
-      `*Interpretation*\n${reflectData.interpretation}\n\n` +
+      `*Interpretation*\n${reflectData.interpretation}`;
+
+    const msg3 =
       `*Application*\n${reflectData.application}\n\n` +
       `*Insight*\n${reflectData.insight}`;
 
     await sendWhatsApp(from, verseMsg);
-    await sendWhatsApp(from, reflectionMsg);
+    await sendWhatsApp(from, msg2);
+    await sendWhatsApp(from, msg3);
 
   } catch (err) {
     console.error('WhatsApp bot error:', err);
