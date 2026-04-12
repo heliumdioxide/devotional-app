@@ -4,28 +4,29 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 
 const WELCOME_MESSAGE = [
-  "🙏 Welcome to Daily Devotional!",
-  "I'll send you a Bible verse and reflection every day.",
+  "🙏 Welcome to Daily Devotional",
+  "",
+  "Each day you'll get a Bible verse and a short reflection.",
   "",
   "Choose your language:",
   "english — English only",
   "中文 — Traditional Chinese",
   "",
-  "Or just reply anything to receive today's verse in English.",
+  "Or send any message to get today's verse in English.",
 ].join("\n");
 
 function commandMenu(lang: string): string {
   const isZh = lang === "chinese";
   if (isZh) {
     return [
-      "指令選單：",
+      "可用指令：",
       "• english — 只用英文",
       "• 中文 — 只用繁體中文",
-      "• help — 顯示此選單",
+      "• help — 顯示這份選單",
     ].join("\n");
   }
   return [
-    "Commands:",
+    "Quick commands:",
     "• english — English only",
     "• 中文 — Traditional Chinese",
     "• help — Show this menu",
@@ -111,9 +112,9 @@ function isHelpCommand(msg: string): boolean {
 function langConfirmation(code: LangCode): string {
   switch (code) {
     case "english":
-      return "Got it! I'll reply in English from now on.";
+      return "Got it — I'll use English from here on.";
     case "chinese":
-      return "好的！我會用繁體中文回覆你。";
+      return "好的，之後我會用繁體中文回覆你。";
     default:
       return "OK.";
   }
@@ -130,6 +131,163 @@ function formatVerseMessage(
     return `📖 *${data.reference}*\n\n*EN*\n${data.english}\n\n*中文*\n${data.chinese}`;
   }
   return `📖 *${data.reference}*\n\n${data.english}`;
+}
+
+type ReflectLang = "english" | "chinese" | "both";
+
+function toReflectLanguage(userLang: string): ReflectLang {
+  const l = userLang.toLowerCase();
+  if (l === "chinese") return "chinese";
+  if (l === "both") return "both";
+  return "english";
+}
+
+function reflectSectionLabels(userLang: string): {
+  keyVerse: string;
+  insights: string;
+  reflection: string;
+} {
+  if (userLang.toLowerCase() === "chinese") {
+    return { keyVerse: "關鍵經文", insights: "亮點", reflection: "反思" };
+  }
+  return { keyVerse: "Key verse", insights: "Insights", reflection: "Reflection" };
+}
+
+type ReflectPayload = {
+  keyVerse: string;
+  insights: string[];
+  reflection: string;
+};
+
+async function fetchReflectionJson(
+  baseUrl: string,
+  verseReference: string,
+  verseEnglish: string,
+  verseChinese: string,
+  verseId: string,
+  language: ReflectLang
+): Promise<ReflectPayload | null> {
+  const chapterRes = await fetch(
+    `${baseUrl}/api/chapter?verseId=${encodeURIComponent(verseId)}`,
+    { cache: "no-store" }
+  );
+  if (!chapterRes.ok) return null;
+  const chapterData = (await chapterRes.json()) as {
+    english?: string;
+    chinese?: string;
+  };
+
+  const reflectRes = await fetch(`${baseUrl}/api/reflect`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      verseReference,
+      verseTextEnglish: verseEnglish,
+      verseTextChinese: verseChinese,
+      chapterTextEnglish: chapterData.english ?? "",
+      chapterTextChinese: chapterData.chinese ?? "",
+      language,
+    }),
+  });
+  if (!reflectRes.ok) return null;
+  const data = await reflectRes.json();
+  if (data?.error) return null;
+
+  const insights = Array.isArray(data.insights)
+    ? data.insights
+    : typeof data.insights === "string"
+      ? [data.insights]
+      : [];
+
+  return {
+    keyVerse: String(data.keyVerse ?? ""),
+    insights,
+    reflection: String(data.reflection ?? ""),
+  };
+}
+
+/** Twilio WhatsApp supports long bodies; split only if a segment is huge. */
+const MAX_WHATSAPP_SEGMENT = 3800;
+
+function chunkForWhatsApp(text: string): string[] {
+  if (text.length <= MAX_WHATSAPP_SEGMENT) return [text];
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > MAX_WHATSAPP_SEGMENT) {
+    let cut = rest.lastIndexOf("\n\n", MAX_WHATSAPP_SEGMENT);
+    if (cut < MAX_WHATSAPP_SEGMENT / 2) cut = rest.lastIndexOf("\n", MAX_WHATSAPP_SEGMENT);
+    if (cut < MAX_WHATSAPP_SEGMENT / 2) cut = MAX_WHATSAPP_SEGMENT;
+    chunks.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
+async function sendTodaysDevotional(
+  to: string,
+  userLang: string,
+  baseUrl: string
+): Promise<void> {
+  const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, { cache: "no-store" });
+
+  if (!verseRes.ok) {
+    const detail = await verseRes.text();
+    console.error("[whatsapp] verse-of-the-day:", verseRes.status, detail);
+    await sendTwilioWhatsApp(
+      to,
+      "We couldn't load today's verse. Please try again in a moment."
+    );
+    return;
+  }
+
+  const verseData = (await verseRes.json()) as {
+    reference: string;
+    english: string;
+    chinese: string;
+    verseId: string;
+  };
+
+  const { reference, english, chinese, verseId } = verseData;
+  const normalizedLang = userLang.toLowerCase();
+
+  const verseMsg = formatVerseMessage(normalizedLang, { reference, english, chinese });
+  for (const segment of chunkForWhatsApp(verseMsg)) {
+    await sendTwilioWhatsApp(to, segment);
+  }
+
+  const reflectLang = toReflectLanguage(normalizedLang);
+  const reflection = await fetchReflectionJson(
+    baseUrl,
+    reference,
+    english,
+    chinese,
+    verseId,
+    reflectLang
+  );
+
+  if (!reflection) {
+    const fallback =
+      normalizedLang === "chinese"
+        ? "（默想暫時無法顯示，經文已在上方。）"
+        : "(Reflection isn't available right now—the verse is above.)";
+    await sendTwilioWhatsApp(to, fallback);
+    return;
+  }
+
+  const labels = reflectSectionLabels(normalizedLang);
+  const insightsLines = reflection.insights.map((s) => `• ${s}`).join("\n");
+  const insightsBlock =
+    `*${labels.keyVerse}*\n${reflection.keyVerse}\n\n` +
+    `*${labels.insights}*\n${insightsLines}`;
+  const reflectionBlock = `*${labels.reflection}*\n${reflection.reflection}`;
+
+  for (const segment of chunkForWhatsApp(insightsBlock)) {
+    await sendTwilioWhatsApp(to, segment);
+  }
+  for (const segment of chunkForWhatsApp(reflectionBlock)) {
+    await sendTwilioWhatsApp(to, segment);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -160,7 +318,7 @@ export async function POST(req: NextRequest) {
       console.error("[whatsapp] Supabase select:", selectError);
       await sendTwilioWhatsApp(
         from,
-        "Sorry, something went wrong. Please try again in a moment."
+        "Something went wrong. Please try again in a moment."
       );
       return twimlEmpty();
     }
@@ -192,6 +350,8 @@ export async function POST(req: NextRequest) {
       return twimlEmpty();
     }
 
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? new URL(req.url).origin;
+
     const langCmd = detectLangCommand(body);
     if (langCmd) {
       const { error: updateError } = await supabase
@@ -203,12 +363,13 @@ export async function POST(req: NextRequest) {
         console.error("[whatsapp] Supabase update lang:", updateError);
         await sendTwilioWhatsApp(
           from,
-          "Sorry, couldn't update your language. Please try again."
+          "We couldn't update your language. Please try again."
         );
         return twimlEmpty();
       }
 
       await sendTwilioWhatsApp(from, langConfirmation(langCmd));
+      await sendTodaysDevotional(from, langCmd, baseUrl);
       return twimlEmpty();
     }
 
@@ -218,36 +379,15 @@ export async function POST(req: NextRequest) {
       return twimlEmpty();
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? new URL(req.url).origin;
-    const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, { cache: "no-store" });
-
-    if (!verseRes.ok) {
-      const detail = await verseRes.text();
-      console.error("[whatsapp] verse-of-the-day:", verseRes.status, detail);
-      await sendTwilioWhatsApp(
-        from,
-        "Sorry, couldn't load today's verse. Please try again in a moment."
-      );
-      return twimlEmpty();
-    }
-
-    const verseData = await verseRes.json();
-    const { reference, english, chinese } = verseData as {
-      reference: string;
-      english: string;
-      chinese: string;
-    };
-
     const userLang = ((user.lang as string) || "english").toLowerCase();
-    const msg = formatVerseMessage(userLang, { reference, english, chinese });
-    await sendTwilioWhatsApp(from, msg);
+    await sendTodaysDevotional(from, userLang, baseUrl);
   } catch (err) {
     console.error("[whatsapp] error:", err);
     try {
       if (from) {
         await sendTwilioWhatsApp(
           from,
-          "Sorry, something went wrong. Please try again in a moment."
+          "Something went wrong. Please try again in a moment."
         );
       }
     } catch {

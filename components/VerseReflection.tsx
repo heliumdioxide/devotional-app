@@ -75,7 +75,7 @@ const VerseReflection = forwardRef<VerseReflectionHandle, Props>(function VerseR
         reflection: String(data.reflection ?? ""),
       });
     } catch (err: any) {
-      setError(err.message || "Failed to load reflection");
+      setError(err.message || "Couldn't load reflection. Try again.");
     } finally {
       setLoading(false);
       onLoadingChange?.(false);

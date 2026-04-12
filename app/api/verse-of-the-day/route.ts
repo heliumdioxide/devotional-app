@@ -67,69 +67,69 @@ function getSeasonContext(date: Date): string {
     (date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / 86400000
   );
 
-  if (month === 12 && day === 25) return "Christmas Day — the incarnation of Jesus Christ";
-  if (month === 1 && day === 1) return "New Year's Day — new beginnings under God's sovereignty";
-  if (month === 10 && day === 31) return "Reformation Day — Scripture alone, grace alone, faith alone";
-  if (month === 12 && day >= 1 && day <= 24) return "Advent — anticipating the coming of Christ";
-  if (month === 4 && day >= 1 && day <= 7) return "Easter week — the resurrection of Jesus Christ";
-  if (month === 3 && day >= 25 && day <= 31) return "Holy Week — the cross and sacrifice of Christ";
-  if (month === 5 && day >= 15 && day <= 25) return "Pentecost season — the gift of the Holy Spirit";
+  if (month === 12 && day === 25) return "Christmas — celebrating the incarnation of Jesus Christ";
+  if (month === 1 && day === 1) return "New Year's Day — new beginnings under God's care and rule";
+  if (month === 10 && day === 31) return "Reformation Day — Scripture, grace, and faith alone";
+  if (month === 12 && day >= 1 && day <= 24) return "Advent — waiting and preparing for Christ's coming";
+  if (month === 4 && day >= 1 && day <= 7) return "Easter week — Christ risen from the dead";
+  if (month === 3 && day >= 25 && day <= 31) return "Holy Week — the cross and Christ's self-giving love";
+  if (month === 5 && day >= 15 && day <= 25) return "Pentecost season — the Holy Spirit given to the church";
 
   const monthThemes: Record<number, string> = {
-    1: "God's sovereignty — trusting His plan for the year ahead",
-    2: "grace and forgiveness — the unearned love of God",
-    3: "repentance and renewal — turning back to God",
-    4: "resurrection life — living in the power of the risen Christ",
-    5: "prayer — dependence on God in daily life",
-    6: "the Word of God — the authority and sufficiency of Scripture",
-    7: "faith — trusting God when circumstances are uncertain",
-    8: "the church — Christian community and belonging",
-    9: "evangelism — the Great Commission and sharing the gospel",
-    10: "perseverance — holding fast through suffering and doubt",
-    11: "gratitude — thanksgiving for God's faithfulness",
-    12: "hope — the return of Christ and the coming kingdom",
+    1: "God's rule and care — trusting him with the year ahead",
+    2: "grace and forgiveness — love we never earned",
+    3: "repentance and newness — turning back to God",
+    4: "resurrection life — walking in the risen Christ",
+    5: "prayer — leaning on God day by day",
+    6: "God's Word — its authority and sufficiency for everyday life",
+    7: "faith — staying with God when life is unclear",
+    8: "the church — belonging and life together in Christ",
+    9: "the gospel going out — witness and the Great Commission",
+    10: "steadfastness — staying faithful through hardship and doubt",
+    11: "thanksgiving — noticing God's faithfulness",
+    12: "hope — Christ's return and the kingdom to come",
   };
 
   const dayThemes: Record<number, string> = {
-    0: "the Lord's Day — gathered worship, rest, and delight in God",
-    1: "faith and vocation — serving God through ordinary work",
-    2: "prayer and dependence — bringing every need before God",
-    3: "the Word of God — studying and sitting with Scripture",
-    4: "Christian community — the body of Christ caring for one another",
-    5: "the cross — repentance and the cost of following Jesus",
-    6: "sabbath rest — stillness and preparation of the heart",
+    0: "the Lord's Day — worship, rest, and joy in God",
+    1: "faith at work — honoring God in ordinary tasks",
+    2: "prayer — laying every need before God",
+    3: "Scripture — reading slowly and listening well",
+    4: "community — caring for one another as Christ's body",
+    5: "the cross — repentance and what it costs to follow Jesus",
+    6: "rest — quieting the heart before God",
   };
 
   return [
     `Day ${dayOfYear} of the year.`,
-    `Monthly theme: ${monthThemes[month]}.`,
-    `Today's rhythm: ${dayThemes[dayOfWeek]}.`,
-    `Select a verse at the intersection of both themes.`,
+    `This month's tone: ${monthThemes[month]}.`,
+    `Today's angle: ${dayThemes[dayOfWeek]}.`,
+    `Pick a verse that fits where these meet.`,
   ].join(" ");
 }
 
 async function getVerseFromAI(dateKey: string, seasonContext: string, attempt: number = 1): Promise<{ verseId: string; reason: string; reasonZh: string }> {
   const prompt = [
-    "You are a thoughtful evangelical pastor selecting today's verse of the day.",
+    "Choose today's verse of the day the way a careful evangelical pastor would: one verse, faithful to Scripture, right for the day.",
     "",
-    `Today is ${dateKey}. The occasion is: ${seasonContext}`,
-    attempt > 1 ? `\nNote: Your previous suggestion failed validation. Please pick a different, well-known verse.\n` : "",
-    "Select ONE Bible verse that is deeply fitting for this occasion from an evangelical perspective.",
-    "Ground your choice in the authority of Scripture, the gospel of Jesus Christ, and practical discipleship.",
+    `Date: ${dateKey}. Context: ${seasonContext}`,
+    attempt > 1 ? `\nYour last pick didn't pass checks—choose a different, widely known verse.\n` : "",
+    "Pick a single verse that fits this moment well from an evangelical outlook.",
+    "Let Scripture's authority, the gospel, and everyday following of Jesus guide you.",
     "",
-    "Respond ONLY with a valid JSON object (no markdown, no backticks) with exactly these keys:",
+    "Reply with a valid JSON object only (no markdown, no backticks). Use exactly these keys:",
     "",
-    '- "verseId": the verse in API.Bible format e.g. "ROM.8.28" or "PSA.23.1"',
-    '- "reason_en": one sentence in English explaining why this verse fits today (warm, pastoral, evangelical)',
-    '- "reason_zh": one sentence in Traditional Chinese (繁體中文, NOT Simplified Chinese 簡體中文) explaining why this verse fits today (warm, pastoral, evangelical). Use Traditional Chinese characters only — e.g. 這、來、說、愛、時、會.',
+    '- "verseId": API.Bible format, e.g. "ROM.8.28" or "PSA.23.1"',
+    '- "reason_en": one warm, pastoral sentence in English on why this verse suits today',
+    '- "reason_zh": the same in Traditional Chinese (繁體中文, not 簡體中文). Traditional characters only—e.g. 這、來、說、愛、時、會.',
     "",
-    "CRITICAL: Use ONLY these exact book codes (case-sensitive):",
+    "Book codes must be one of these (case-sensitive, exactly as written):",
     "GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV",
     "",
-    "Format MUST be BOOK.CHAPTER.VERSE with dots, e.g. JHN.3.16 or PSA.23.1",
-    "Choose a verse substantial enough to stand alone — avoid very short verses that lose meaning without context.",
+    "Use BOOK.CHAPTER.VERSE with dots (e.g. JHN.3.16, PSA.23.1).",
+    "Prefer a verse that can stand on its own—skip fragments that need lots of setup to make sense.",
     "",
-    "CRITICAL: Return ONLY a raw JSON object. No markdown. No backticks. Start with { and end with }",
+    "Output: raw JSON only. No markdown, no code fences. Start with { and end with }.",
   ].join("\n");
 
   const aiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
