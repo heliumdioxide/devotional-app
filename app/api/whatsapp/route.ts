@@ -22,9 +22,7 @@ function getSupabase() {
     process.env.SUPABASE_SERVICE_ROLE?.trim() ||
     process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!url || !key) {
-    throw new Error(
-      "Missing Supabase env: set SUPABASE_URL and SUPABASE_SERVICE_ROLE"
-    );
+    throw new Error("Missing Supabase env: set SUPABASE_URL and SUPABASE_SERVICE_ROLE");
   }
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -49,12 +47,7 @@ async function sendTwilioTemplate(
   if (!sid || !token || !from) throw new Error("Missing Twilio env vars");
 
   const auth = Buffer.from(`${sid}:${token}`).toString("base64");
-
-  const params: Record<string, string> = {
-    To:   to,
-    From: from,
-    ContentSid: templateSid,
-  };
+  const params: Record<string, string> = { To: to, From: from, ContentSid: templateSid };
   if (variables && Object.keys(variables).length > 0) {
     params.ContentVariables = JSON.stringify(variables);
   }
@@ -70,7 +63,6 @@ async function sendTwilioTemplate(
       body: new URLSearchParams(params),
     }
   );
-
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Twilio ${res.status}: ${text}`);
@@ -95,7 +87,6 @@ async function sendTwilioWhatsApp(to: string, body: string): Promise<void> {
       body: new URLSearchParams({ To: to, From: from, Body: body }),
     }
   );
-
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Twilio ${res.status}: ${text}`);
@@ -110,9 +101,7 @@ function twimlEmpty(): NextResponse {
 }
 
 // ── Language detection ─────────────────────────────────────────
-/** Detect language from phone number. +852 = HK → Chinese, else English. */
 function detectLangFromPhone(phone: string): "chinese" | "english" {
-  // phone arrives as "whatsapp:+85291234567"
   const digits = phone.replace(/^whatsapp:\+?/, "");
   return digits.startsWith("852") ? "chinese" : "english";
 }
@@ -132,7 +121,6 @@ type ButtonAction =
 
 function detectButtonAction(body: string): ButtonAction {
   const t = body.trim().toLowerCase();
-  // Match both button IDs and button text labels
   if (t === "show_verse"      || t === "show verse")      return "show_verse";
   if (t === "change_language" || t === "change language") return "change_language";
   if (t === "english")                                    return "select_english";
@@ -141,7 +129,7 @@ function detectButtonAction(body: string): ButtonAction {
   return null;
 }
 
-// ── Lang command detection (manual text) ──────────────────────
+// ── Lang command detection ─────────────────────────────────────
 type LangCode = "english" | "chinese";
 
 function detectLangCommand(msg: string): LangCode | null {
@@ -157,19 +145,9 @@ function isHelpCommand(msg: string): boolean {
 
 function commandMenu(lang: string): string {
   if (isHK(lang)) {
-    return [
-      "可用指令：",
-      "• english — 只用英文",
-      "• 中文 — 只用繁體中文",
-      "• help — 顯示這份選單",
-    ].join("\n");
+    return ["可用指令：", "• english — 只用英文", "• 中文 — 只用繁體中文", "• help — 顯示這份選單"].join("\n");
   }
-  return [
-    "Quick commands:",
-    "• english — English only",
-    "• 中文 — Traditional Chinese",
-    "• help — Show this menu",
-  ].join("\n");
+  return ["Quick commands:", "• english — English only", "• 中文 — Traditional Chinese", "• help — Show this menu"].join("\n");
 }
 
 // ── Reflection helpers ─────────────────────────────────────────
@@ -208,18 +186,15 @@ async function fetchReflectionJson(
     { cache: "no-store" }
   );
   if (!chapterRes.ok) return null;
-  const chapterData = (await chapterRes.json()) as {
-    english?: string;
-    chinese?: string;
-  };
+  const chapterData = (await chapterRes.json()) as { english?: string; chinese?: string };
 
   const reflectRes = await fetch(`${baseUrl}/api/reflect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       verseReference,
-      verseTextEnglish:  verseEnglish,
-      verseTextChinese:  verseChinese,
+      verseTextEnglish:   verseEnglish,
+      verseTextChinese:   verseChinese,
       chapterTextEnglish: chapterData.english ?? "",
       chapterTextChinese: chapterData.chinese ?? "",
       language,
@@ -259,19 +234,15 @@ function chunkForWhatsApp(text: string): string[] {
   return chunks;
 }
 
-// ── Send today's verse via template ───────────────────────────
-async function sendVerseTemplate(
+// ── Send verse only (no reflection) ───────────────────────────
+async function sendVerseOnly(
   to: string,
   userLang: string,
   baseUrl: string
 ): Promise<void> {
-  const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, {
-    cache: "no-store",
-  });
+  const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, { cache: "no-store" });
 
   if (!verseRes.ok) {
-    const detail = await verseRes.text();
-    console.error("[whatsapp] verse-of-the-day:", verseRes.status, detail);
     const errMsg = isHK(userLang)
       ? "無法載入今日經文，請稍後再試。"
       : "We couldn't load today's verse. Please try again in a moment.";
@@ -279,40 +250,44 @@ async function sendVerseTemplate(
     return;
   }
 
-  const verseData = (await verseRes.json()) as {
-    reference: string;
-    english:   string;
-    chinese:   string;
-    verseId:   string;
-  };
+  const { reference, english, chinese } = await verseRes.json();
+  const verseText   = isHK(userLang) ? chinese : english;
+  const templateSid = isHK(userLang) ? TEMPLATES.verse_hk : TEMPLATES.verse_en;
 
-  const { reference, english, chinese, verseId } = verseData;
-  const normalizedLang = userLang.toLowerCase();
+  await sendTwilioTemplate(to, templateSid, { "1": verseText, "2": reference });
+}
 
-  // Send verse via approved template
-  const templateSid = isHK(normalizedLang) ? TEMPLATES.verse_hk : TEMPLATES.verse_en;
-  const verseText   = isHK(normalizedLang) ? chinese : english;
+// ── Send reflection only (after "I have read") ────────────────
+async function sendReflectionOnly(
+  to: string,
+  userLang: string,
+  baseUrl: string
+): Promise<void> {
+  const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, { cache: "no-store" });
 
-  await sendTwilioTemplate(to, templateSid, {
-    "1": verseText,
-    "2": reference,
-  });
+  if (!verseRes.ok) {
+    const errMsg = isHK(userLang)
+      ? "無法載入反思，請稍後再試。"
+      : "Reflection isn't available right now. Please try again.";
+    await sendTwilioWhatsApp(to, errMsg);
+    return;
+  }
 
-  // Send reflection as plain messages (no template needed for reflection)
-  const reflectLang = toReflectLanguage(normalizedLang);
+  const { reference, english, chinese, verseId } = await verseRes.json();
+  const reflectLang = toReflectLanguage(userLang);
   const reflection  = await fetchReflectionJson(
     baseUrl, reference, english, chinese, verseId, reflectLang
   );
 
   if (!reflection) {
-    const fallback = isHK(normalizedLang)
-      ? "（默想暫時無法顯示，經文已在上方。）"
-      : "(Reflection isn't available right now—the verse is above.)";
+    const fallback = isHK(userLang)
+      ? "（默想暫時無法顯示。）"
+      : "(Reflection isn't available right now.)";
     await sendTwilioWhatsApp(to, fallback);
     return;
   }
 
-  const labels       = reflectSectionLabels(normalizedLang);
+  const labels        = reflectSectionLabels(userLang);
   const insightsLines = reflection.insights.map((s) => `• ${s}`).join("\n");
   const insightsBlock =
     `*${labels.keyVerse}*\n${reflection.keyVerse}\n\n` +
@@ -357,20 +332,16 @@ export async function POST(req: NextRequest) {
       return twimlEmpty();
     }
 
-    // ── New user: detect lang from phone, send welcome template ──
+    // ── New user ──────────────────────────────────────────────
     if (!user || user.welcomed !== true) {
       const detectedLang = detectLangFromPhone(from);
-      const welcomeSid   = detectedLang === "chinese"
-        ? TEMPLATES.welcome_hk
-        : TEMPLATES.welcome_en;
+      const welcomeSid   = detectedLang === "chinese" ? TEMPLATES.welcome_hk : TEMPLATES.welcome_en;
 
       await sendTwilioTemplate(from, welcomeSid);
 
       if (!user) {
         const { error: insertError } = await supabase.from("users").insert({
-          phone:    from,
-          lang:     detectedLang,
-          welcomed: true,
+          phone: from, lang: detectedLang, welcomed: true,
         });
         if (insertError) console.error("[whatsapp] Supabase insert:", insertError);
       } else {
@@ -385,24 +356,30 @@ export async function POST(req: NextRequest) {
     }
 
     const userLang = ((user.lang as string) || "english").toLowerCase();
-
-    // ── Button actions ────────────────────────────────────────
     const buttonAction = detectButtonAction(body);
 
-    if (buttonAction === "show_verse" || buttonAction === "i_have_read") {
-      await sendVerseTemplate(from, userLang, baseUrl);
+    // ── Button: Show Verse → verse only ──────────────────────
+    if (buttonAction === "show_verse") {
+      await sendVerseOnly(from, userLang, baseUrl);
       return twimlEmpty();
     }
 
+    // ── Button: I have read → reflection only ─────────────────
+    if (buttonAction === "i_have_read") {
+      await sendReflectionOnly(from, userLang, baseUrl);
+      return twimlEmpty();
+    }
+
+    // ── Button: Change Language → lang selection template ─────
     if (buttonAction === "change_language") {
       const langSid = isHK(userLang) ? TEMPLATES.lang_hk : TEMPLATES.lang_en;
       await sendTwilioTemplate(from, langSid);
       return twimlEmpty();
     }
 
+    // ── Button: English / 中文 → update lang, send verse ──────
     if (buttonAction === "select_english" || buttonAction === "select_chinese") {
       const newLang: LangCode = buttonAction === "select_chinese" ? "chinese" : "english";
-
       const { error: updateError } = await supabase
         .from("users")
         .update({ lang: newLang })
@@ -414,11 +391,11 @@ export async function POST(req: NextRequest) {
         return twimlEmpty();
       }
 
-      await sendVerseTemplate(from, newLang, baseUrl);
+      await sendVerseOnly(from, newLang, baseUrl);
       return twimlEmpty();
     }
 
-    // ── Manual text commands ──────────────────────────────────
+    // ── Manual text: english / 中文 ───────────────────────────
     const langCmd = detectLangCommand(body);
     if (langCmd) {
       const { error: updateError } = await supabase
@@ -432,24 +409,23 @@ export async function POST(req: NextRequest) {
         return twimlEmpty();
       }
 
-      await sendVerseTemplate(from, langCmd, baseUrl);
+      await sendVerseOnly(from, langCmd, baseUrl);
       return twimlEmpty();
     }
 
+    // ── Manual text: help ─────────────────────────────────────
     if (isHelpCommand(body)) {
       await sendTwilioWhatsApp(from, commandMenu(userLang));
       return twimlEmpty();
     }
 
-    // ── Any other message: send today's verse ─────────────────
-    await sendVerseTemplate(from, userLang, baseUrl);
+    // ── Any other message: send verse only ────────────────────
+    await sendVerseOnly(from, userLang, baseUrl);
 
   } catch (err) {
     console.error("[whatsapp] error:", err);
     try {
-      if (from) {
-        await sendTwilioWhatsApp(from, "Something went wrong. Please try again.");
-      }
+      if (from) await sendTwilioWhatsApp(from, "Something went wrong. Please try again.");
     } catch { /* ignore */ }
   }
 
