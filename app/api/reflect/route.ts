@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.0-flash-001",
+        model: "mistralai/mistral-medium-3",
         max_tokens: 2000,
         messages: [{ role: "user", content: prompt }],
       }),
