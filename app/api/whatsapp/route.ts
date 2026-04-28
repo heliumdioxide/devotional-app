@@ -121,6 +121,7 @@ type ButtonAction =
 
 function detectButtonAction(body: string): ButtonAction {
   const t = body.trim().toLowerCase();
+  console.log("[whatsapp] detectButtonAction input:", JSON.stringify(t));
   if (t === "show_verse"      || t === "show verse")      return "show_verse";
   if (t === "change_language" || t === "change language") return "change_language";
   if (t === "english")                                    return "select_english";
@@ -314,6 +315,8 @@ export async function POST(req: NextRequest) {
   const from = String(formData.get("From") ?? "");
   const body = String(formData.get("Body") ?? "");
 
+  console.log("[whatsapp] incoming from:", from, "body:", JSON.stringify(body));
+
   if (!from) return twimlEmpty();
 
   try {
@@ -357,6 +360,8 @@ export async function POST(req: NextRequest) {
 
     const userLang = ((user.lang as string) || "english").toLowerCase();
     const buttonAction = detectButtonAction(body);
+
+    console.log("[whatsapp] buttonAction:", buttonAction, "userLang:", userLang);
 
     // ── Button: Show Verse → verse only ──────────────────────
     if (buttonAction === "show_verse") {
