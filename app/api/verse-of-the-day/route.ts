@@ -1,216 +1,467 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
-const API_KEY = process.env.API_BIBLE_KEY?.trim() || "";
-const EN_BIBLE_ID = process.env.API_BIBLE_EN?.trim() || "";
-const ZH_BIBLE_ID = "a6e06d2c5b90ad89-01";
+// ── Template SIDs ──────────────────────────────────────────────
+const TEMPLATES = {
+  welcome_en: "HXada29ce32d95e0ed2fb3f9d57c48b1bc",
+  welcome_hk: "HXf576519767d82de62401e32d1963bcda",
+  verse_en:   "HX7598c1c70624b0cb1c5dace78097a3ea",
+  verse_hk:   "HX973433daa6fff57fddc7bbb95ff9a0c8",
+  lang_en:    "HXfc310f2cbd91bdcde9a1f12b37512993",
+  lang_hk:    "HXaf98fd6cb554f6c5857d8845228dfbab",
+};
 
-const VALID_BOOK_CODES = new Set([
-  "GEN","EXO","LEV","NUM","DEU","JOS","JDG","RUT","1SA","2SA","1KI","2KI",
-  "1CH","2CH","EZR","NEH","EST","JOB","PSA","PRO","ECC","SNG","ISA","JER",
-  "LAM","EZK","DAN","HOS","JOL","AMO","OBA","JON","MIC","NAM","HAB","ZEP",
-  "HAG","ZEC","MAL","MAT","MRK","LUK","JHN","ACT","ROM","1CO","2CO","GAL",
-  "EPH","PHP","COL","1TH","2TH","1TI","2TI","TIT","PHM","HEB","JAS","1PE",
-  "2PE","1JN","2JN","3JN","JUD","REV"
-]);
-
-function isValidVerseId(verseId: string): boolean {
-  if (!verseId || typeof verseId !== "string") return false;
-  const parts = verseId.split(".");
-  if (parts.length !== 3) return false;
-  const [book, chapter, verse] = parts;
-  if (!VALID_BOOK_CODES.has(book)) return false;
-  if (isNaN(Number(chapter)) || isNaN(Number(verse))) return false;
-  if (Number(chapter) < 1 || Number(verse) < 1) return false;
-  return true;
-}
-
-async function fetchWithKey(url: string) {
-  return fetch(url, {
-    method: "GET",
-    headers: { "api-key": API_KEY, Accept: "application/json" },
-    cache: "no-store",
-    redirect: "manual",
+// ── Supabase ───────────────────────────────────────────────────
+function getSupabase() {
+  const url =
+    process.env.SUPABASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE?.trim() ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!url || !key) {
+    throw new Error(
+      "Missing Supabase env: set SUPABASE_URL and SUPABASE_SERVICE_ROLE"
+    );
+  }
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
-async function fetchVerse(bibleId: string, verseId: string) {
-  const url = `https://rest.api.bible/v1/bibles/${bibleId}/verses/${verseId}?content-type=text`;
-  let res = await fetchWithKey(url);
+// ── Twilio helpers ─────────────────────────────────────────────
+function twilioWhatsAppFrom(): string {
+  const raw = (process.env.TWILIO_WHATSAPP_FROM ?? "").trim();
+  if (!raw) return "";
+  return raw.startsWith("whatsapp:") ? raw : `whatsapp:${raw}`;
+}
 
-  if (res.status >= 300 && res.status < 400) {
-    const location = res.headers.get("location");
-    if (!location) throw new Error(`Redirect without location`);
-    res = await fetch(location, {
-      method: "GET",
-      headers: { "api-key": API_KEY, Accept: "application/json" },
-      cache: "no-store",
-    });
+async function sendTwilioTemplate(
+  to: string,
+  templateSid: string,
+  variables?: Record<string, string>
+): Promise<void> {
+  const sid   = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from  = twilioWhatsAppFrom();
+  if (!sid || !token || !from) throw new Error("Missing Twilio env vars");
+
+  const auth = Buffer.from(`${sid}:${token}`).toString("base64");
+
+  const params: Record<string, string> = {
+    To:   to,
+    From: from,
+    ContentSid: templateSid,
+  };
+  if (variables && Object.keys(variables).length > 0) {
+    params.ContentVariables = JSON.stringify(variables);
   }
 
-  const raw = await res.text();
-  if (!res.ok) throw new Error(`UPSTREAM: ${res.status} ${raw}`);
-
-  const json = JSON.parse(raw);
-  return {
-    reference: json.data.reference,
-    content: json.data.content.trim(),
-  };
-}
-
-function getSeasonContext(date: Date): string {
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const dayOfWeek = date.getDay();
-  const dayOfYear = Math.floor(
-    (date.getTime() - new Date(date.getFullYear(), 0, 0).getTime()) / 86400000
+  const res = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(params),
+    }
   );
 
-  if (month === 12 && day === 25) return "Christmas — celebrating the incarnation of Jesus Christ";
-  if (month === 1 && day === 1) return "New Year's Day — new beginnings under God's care and rule";
-  if (month === 10 && day === 31) return "Reformation Day — Scripture, grace, and faith alone";
-  if (month === 12 && day >= 1 && day <= 24) return "Advent — waiting and preparing for Christ's coming";
-  if (month === 4 && day >= 1 && day <= 7) return "Easter week — Christ risen from the dead";
-  if (month === 3 && day >= 25 && day <= 31) return "Holy Week — the cross and Christ's self-giving love";
-  if (month === 5 && day >= 15 && day <= 25) return "Pentecost season — the Holy Spirit given to the church";
-
-  const monthThemes: Record<number, string> = {
-    1: "God's rule and care — trusting him with the year ahead",
-    2: "grace and forgiveness — love we never earned",
-    3: "repentance and newness — turning back to God",
-    4: "resurrection life — walking in the risen Christ",
-    5: "prayer — leaning on God day by day",
-    6: "God's Word — its authority and sufficiency for everyday life",
-    7: "faith — staying with God when life is unclear",
-    8: "the church — belonging and life together in Christ",
-    9: "the gospel going out — witness and the Great Commission",
-    10: "steadfastness — staying faithful through hardship and doubt",
-    11: "thanksgiving — noticing God's faithfulness",
-    12: "hope — Christ's return and the kingdom to come",
-  };
-
-  const dayThemes: Record<number, string> = {
-    0: "the Lord's Day — worship, rest, and joy in God",
-    1: "faith at work — honoring God in ordinary tasks",
-    2: "prayer — laying every need before God",
-    3: "Scripture — reading slowly and listening well",
-    4: "community — caring for one another as Christ's body",
-    5: "the cross — repentance and what it costs to follow Jesus",
-    6: "rest — quieting the heart before God",
-  };
-
-  return [
-    `Day ${dayOfYear} of the year.`,
-    `This month's tone: ${monthThemes[month]}.`,
-    `Today's angle: ${dayThemes[dayOfWeek]}.`,
-    `Pick a verse that fits where these meet.`,
-  ].join(" ");
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Twilio ${res.status}: ${text}`);
+  }
 }
 
-async function getVerseFromAI(dateKey: string, seasonContext: string, attempt: number = 1): Promise<{ verseId: string; reason: string; reasonZh: string }> {
-  const prompt = [
-    "Choose today's verse of the day the way a careful evangelical pastor would: one verse, faithful to Scripture, right for the day.",
-    "",
-    `Date: ${dateKey}. Context: ${seasonContext}`,
-    attempt > 1 ? `\nYour last pick didn't pass checks—choose a different, widely known verse.\n` : "",
-    "Pick a single verse that fits this moment well from an evangelical outlook.",
-    "Let Scripture's authority, the gospel, and everyday following of Jesus guide you.",
-    "",
-    "Reply with a valid JSON object only (no markdown, no backticks). Use exactly these keys:",
-    "",
-    '- "verseId": API.Bible format, e.g. "ROM.8.28" or "PSA.23.1"',
-    '- "reason_en": one warm, pastoral sentence in English on why this verse suits today',
-    '- "reason_zh": the same in Traditional Chinese (繁體中文, not 簡體中文). Traditional characters only—e.g. 這、來、說、愛、時、會.',
-    "",
-    "Book codes must be one of these (case-sensitive, exactly as written):",
-    "GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV",
-    "",
-    "Use BOOK.CHAPTER.VERSE with dots (e.g. JHN.3.16, PSA.23.1).",
-    "Prefer a verse that can stand on its own—skip fragments that need lots of setup to make sense.",
-    "",
-    "Output: raw JSON only. No markdown, no code fences. Start with { and end with }.",
-  ].join("\n");
+async function sendTwilioWhatsApp(to: string, body: string): Promise<void> {
+  const sid   = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from  = twilioWhatsAppFrom();
+  if (!sid || !token || !from) throw new Error("Missing Twilio env vars");
 
-  const aiRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const auth = Buffer.from(`${sid}:${token}`).toString("base64");
+  const res = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ To: to, From: from, Body: body }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Twilio ${res.status}: ${text}`);
+  }
+}
+
+function twimlEmpty(): NextResponse {
+  return new NextResponse(
+    '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+    { status: 200, headers: { "Content-Type": "text/xml; charset=utf-8" } }
+  );
+}
+
+// ── Language detection ─────────────────────────────────────────
+function detectLangFromPhone(phone: string): "chinese" | "english" {
+  const digits = phone.replace(/^whatsapp:\+?/, "");
+  return digits.startsWith("852") ? "chinese" : "english";
+}
+
+function isHK(lang: string) {
+  return lang.toLowerCase() === "chinese";
+}
+
+// ── Button payload detection ───────────────────────────────────
+type ButtonAction =
+  | "show_verse"
+  | "change_language"
+  | "select_english"
+  | "select_chinese"
+  | "i_have_read"
+  | null;
+
+function detectButtonAction(body: string): ButtonAction {
+  const t = body.trim().toLowerCase();
+  if (t === "show_verse"      || t === "show verse")      return "show_verse";
+  if (t === "change_language" || t === "change language") return "change_language";
+  if (t === "english")                                    return "select_english";
+  if (t === "中文")                                        return "select_chinese";
+  if (t === "i_have_read"     || t === "i have read")     return "i_have_read";
+  return null;
+}
+
+// ── Lang command detection ─────────────────────────────────────
+type LangCode = "english" | "chinese";
+
+function detectLangCommand(msg: string): LangCode | null {
+  const t = msg.trim().toLowerCase();
+  if (t === "english") return "english";
+  if (msg.trim() === "中文") return "chinese";
+  return null;
+}
+
+function isHelpCommand(msg: string): boolean {
+  return msg.trim().toLowerCase() === "help";
+}
+
+function commandMenu(lang: string): string {
+  if (isHK(lang)) {
+    return [
+      "可用指令：",
+      "• english — 只用英文",
+      "• 中文 — 只用繁體中文",
+      "• help — 顯示這份選單",
+    ].join("\n");
+  }
+  return [
+    "Quick commands:",
+    "• english — English only",
+    "• 中文 — Traditional Chinese",
+    "• help — Show this menu",
+  ].join("\n");
+}
+
+// ── Reflection helpers ─────────────────────────────────────────
+type ReflectLang = "english" | "chinese" | "both";
+
+function toReflectLanguage(userLang: string): ReflectLang {
+  const l = userLang.toLowerCase();
+  if (l === "chinese") return "chinese";
+  if (l === "both")    return "both";
+  return "english";
+}
+
+function reflectSectionLabels(userLang: string) {
+  if (isHK(userLang)) {
+    return { keyVerse: "關鍵經文", insights: "亮點", reflection: "反思" };
+  }
+  return { keyVerse: "Key verse", insights: "Insights", reflection: "Reflection" };
+}
+
+type ReflectPayload = {
+  keyVerse: string;
+  insights: string[];
+  reflection: string;
+};
+
+async function fetchReflectionJson(
+  baseUrl: string,
+  verseReference: string,
+  verseEnglish: string,
+  verseChinese: string,
+  verseId: string,
+  language: ReflectLang
+): Promise<ReflectPayload | null> {
+  const chapterRes = await fetch(
+    `${baseUrl}/api/chapter?verseId=${encodeURIComponent(verseId)}`,
+    { cache: "no-store" }
+  );
+  if (!chapterRes.ok) return null;
+  const chapterData = (await chapterRes.json()) as {
+    english?: string;
+    chinese?: string;
+  };
+
+  const reflectRes = await fetch(`${baseUrl}/api/reflect`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "mistralai/mistral-medium-3",
-      max_tokens: 300,
-      messages: [{ role: "user", content: prompt }],
+      verseReference,
+      verseTextEnglish:   verseEnglish,
+      verseTextChinese:   verseChinese,
+      chapterTextEnglish: chapterData.english ?? "",
+      chapterTextChinese: chapterData.chinese ?? "",
+      language,
     }),
   });
+  if (!reflectRes.ok) return null;
+  const data = await reflectRes.json();
+  if (data?.error) return null;
 
-  const aiData = await aiRes.json();
-  const raw = aiData.choices?.[0]?.message?.content ?? "";
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error(`No JSON in AI response: ${raw}`);
-  const parsed = JSON.parse(jsonMatch[0]);
+  const insights = Array.isArray(data.insights)
+    ? data.insights
+    : typeof data.insights === "string"
+      ? [data.insights]
+      : [];
 
   return {
-    verseId: parsed.verseId,
-    reason: parsed.reason_en || parsed.reason || "",
-    reasonZh: parsed.reason_zh || parsed.reason_en || parsed.reason || "",
+    keyVerse:   String(data.keyVerse   ?? ""),
+    insights,
+    reflection: String(data.reflection ?? ""),
   };
 }
 
-export async function GET() {
-  if (!API_KEY || !EN_BIBLE_ID) {
-    return NextResponse.json({ error: "Missing API keys" }, { status: 500 });
+const MAX_WHATSAPP_SEGMENT = 3800;
+
+function chunkForWhatsApp(text: string): string[] {
+  if (text.length <= MAX_WHATSAPP_SEGMENT) return [text];
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > MAX_WHATSAPP_SEGMENT) {
+    let cut = rest.lastIndexOf("\n\n", MAX_WHATSAPP_SEGMENT);
+    if (cut < MAX_WHATSAPP_SEGMENT / 2) cut = rest.lastIndexOf("\n", MAX_WHATSAPP_SEGMENT);
+    if (cut < MAX_WHATSAPP_SEGMENT / 2) cut = MAX_WHATSAPP_SEGMENT;
+    chunks.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
+// ── Send verse only (no reflection) ───────────────────────────
+async function sendVerseTemplate(
+  to: string,
+  userLang: string,
+  baseUrl: string
+): Promise<void> {
+  const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, {
+    cache: "no-store",
+  });
+
+  if (!verseRes.ok) {
+    const errMsg = isHK(userLang)
+      ? "無法載入今日經文，請稍後再試。"
+      : "We couldn't load today's verse. Please try again in a moment.";
+    await sendTwilioWhatsApp(to, errMsg);
+    return;
   }
 
-  const today = new Date();
-  const dateKey = today.toISOString().split("T")[0];
-  const seasonContext = getSeasonContext(today);
+  const { reference, english, chinese } = await verseRes.json();
+  const verseText   = isHK(userLang) ? chinese : english;
+  const templateSid = isHK(userLang) ? TEMPLATES.verse_hk : TEMPLATES.verse_en;
 
-  const MAX_ATTEMPTS = 3;
-  let lastError = "";
+  await sendTwilioTemplate(to, templateSid, {
+    "1": verseText,
+    "2": reference,
+  });
+  // No reflection here — user must tap "I have read" to get it
+}
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    let verseId: string;
-    let reason: string;
-    let reasonZh: string;
+// ── Send reflection only (no verse) ───────────────────────────
+async function sendReflectionOnly(
+  to: string,
+  userLang: string,
+  baseUrl: string
+): Promise<void> {
+  const verseRes = await fetch(`${baseUrl}/api/verse-of-the-day`, {
+    cache: "no-store",
+  });
 
-    try {
-      ({ verseId, reason, reasonZh } = await getVerseFromAI(dateKey, seasonContext, attempt));
-    } catch (err) {
-      return NextResponse.json({ error: "AI parse failed", detail: String(err) }, { status: 500 });
-    }
-
-    if (!isValidVerseId(verseId)) {
-      lastError = `Invalid verseId format: "${verseId}"`;
-      console.warn(`[verse-of-the-day] Attempt ${attempt}: ${lastError}`);
-      continue;
-    }
-
-    try {
-      const [english, chinese] = await Promise.all([
-        fetchVerse(EN_BIBLE_ID, verseId),
-        fetchVerse(ZH_BIBLE_ID, verseId),
-      ]);
-
-      return NextResponse.json({
-        reference: english.reference,
-        english: english.content,
-        chinese: chinese.content,
-        verseId,
-        reason,
-        reasonZh,
-        season: seasonContext,
-        date: dateKey,
-      });
-    } catch (err) {
-      lastError = String(err);
-      console.warn(`[verse-of-the-day] Attempt ${attempt}: Verse fetch failed for "${verseId}": ${lastError}`);
-    }
+  if (!verseRes.ok) {
+    const errMsg = isHK(userLang)
+      ? "無法載入反思，請稍後再試。"
+      : "Reflection isn't available right now. Please try again.";
+    await sendTwilioWhatsApp(to, errMsg);
+    return;
   }
 
-  return NextResponse.json(
-    { error: "Failed after 3 attempts", detail: lastError },
-    { status: 500 }
+  const { reference, english, chinese, verseId } = await verseRes.json();
+  const reflectLang  = toReflectLanguage(userLang);
+  const reflection   = await fetchReflectionJson(
+    baseUrl, reference, english, chinese, verseId, reflectLang
   );
+
+  if (!reflection) {
+    const fallback = isHK(userLang)
+      ? "（默想暫時無法顯示。）"
+      : "(Reflection isn't available right now.)";
+    await sendTwilioWhatsApp(to, fallback);
+    return;
+  }
+
+  const labels        = reflectSectionLabels(userLang);
+  const insightsLines = reflection.insights.map((s) => `• ${s}`).join("\n");
+  const insightsBlock =
+    `*${labels.keyVerse}*\n${reflection.keyVerse}\n\n` +
+    `*${labels.insights}*\n${insightsLines}`;
+  const reflectionBlock = `*${labels.reflection}*\n${reflection.reflection}`;
+
+  for (const segment of chunkForWhatsApp(insightsBlock)) {
+    await sendTwilioWhatsApp(to, segment);
+  }
+  for (const segment of chunkForWhatsApp(reflectionBlock)) {
+    await sendTwilioWhatsApp(to, segment);
+  }
+}
+
+// ── Main POST handler ──────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  let formData: FormData;
+  try {
+    formData = await req.formData();
+  } catch {
+    return twimlEmpty();
+  }
+
+  const from = String(formData.get("From") ?? "");
+  const body = String(formData.get("Body") ?? "");
+
+  if (!from) return twimlEmpty();
+
+  try {
+    const supabase = getSupabase();
+    const baseUrl  = process.env.NEXT_PUBLIC_BASE_URL ?? new URL(req.url).origin;
+
+    const { data: user, error: selectError } = await supabase
+      .from("users")
+      .select("phone, lang, welcomed")
+      .eq("phone", from)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error("[whatsapp] Supabase select:", selectError);
+      await sendTwilioWhatsApp(from, "Something went wrong. Please try again.");
+      return twimlEmpty();
+    }
+
+    // ── New user ──────────────────────────────────────────────
+    if (!user || user.welcomed !== true) {
+      const detectedLang = detectLangFromPhone(from);
+      const welcomeSid   = detectedLang === "chinese"
+        ? TEMPLATES.welcome_hk
+        : TEMPLATES.welcome_en;
+
+      await sendTwilioTemplate(from, welcomeSid);
+
+      if (!user) {
+        const { error: insertError } = await supabase.from("users").insert({
+          phone:    from,
+          lang:     detectedLang,
+          welcomed: true,
+        });
+        if (insertError) console.error("[whatsapp] Supabase insert:", insertError);
+      } else {
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({ welcomed: true, lang: detectedLang })
+          .eq("phone", from);
+        if (updateError) console.error("[whatsapp] Supabase update welcomed:", updateError);
+      }
+
+      return twimlEmpty();
+    }
+
+    const userLang = ((user.lang as string) || "english").toLowerCase();
+
+    // ── Button actions ────────────────────────────────────────
+    const buttonAction = detectButtonAction(body);
+
+    if (buttonAction === "show_verse") {
+      await sendVerseTemplate(from, userLang, baseUrl);
+      return twimlEmpty();
+    }
+
+    if (buttonAction === "i_have_read") {
+      await sendReflectionOnly(from, userLang, baseUrl);
+      return twimlEmpty();
+    }
+
+    if (buttonAction === "change_language") {
+      const langSid = isHK(userLang) ? TEMPLATES.lang_hk : TEMPLATES.lang_en;
+      await sendTwilioTemplate(from, langSid);
+      return twimlEmpty();
+    }
+
+    if (buttonAction === "select_english" || buttonAction === "select_chinese") {
+      const newLang: LangCode = buttonAction === "select_chinese" ? "chinese" : "english";
+
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({ lang: newLang })
+        .eq("phone", from);
+
+      if (updateError) {
+        console.error("[whatsapp] Supabase update lang:", updateError);
+        await sendTwilioWhatsApp(from, "We couldn't update your language. Please try again.");
+        return twimlEmpty();
+      }
+
+      await sendVerseTemplate(from, newLang, baseUrl);
+      return twimlEmpty();
+    }
+
+    // ── Manual text commands ──────────────────────────────────
+    const langCmd = detectLangCommand(body);
+    if (langCmd) {
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({ lang: langCmd })
+        .eq("phone", from);
+
+      if (updateError) {
+        console.error("[whatsapp] Supabase update lang:", updateError);
+        await sendTwilioWhatsApp(from, "We couldn't update your language. Please try again.");
+        return twimlEmpty();
+      }
+
+      await sendVerseTemplate(from, langCmd, baseUrl);
+      return twimlEmpty();
+    }
+
+    if (isHelpCommand(body)) {
+      await sendTwilioWhatsApp(from, commandMenu(userLang));
+      return twimlEmpty();
+    }
+
+    // ── Any other message: send today's verse ─────────────────
+    await sendVerseTemplate(from, userLang, baseUrl);
+
+  } catch (err) {
+    console.error("[whatsapp] error:", err);
+    try {
+      if (from) {
+        await sendTwilioWhatsApp(from, "Something went wrong. Please try again.");
+      }
+    } catch { /* ignore */ }
+  }
+
+  return twimlEmpty();
 }
