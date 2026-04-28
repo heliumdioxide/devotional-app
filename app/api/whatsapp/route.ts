@@ -119,16 +119,17 @@ type ButtonAction =
   | "i_have_read"
   | null;
 
-function detectButtonAction(body: string): ButtonAction {
-  const t = body.trim().toLowerCase();
-  console.log("[whatsapp] detectButtonAction input:", JSON.stringify(t));
-  if (t === "show_verse"      || t === "show verse")      return "show_verse";
-  if (t === "change_language" || t === "change language") return "change_language";
-  if (t === "english")                                    return "select_english";
-  if (t === "中文")                                        return "select_chinese";
-  if (t === "i_have_read"     || t === "i have read")     return "i_have_read";
-  return null;
-}
+  function detectButtonAction(body: string): ButtonAction {
+    const t = body.trim().toLowerCase();
+    const raw = body.trim();
+    console.log("[whatsapp] detectButtonAction input:", JSON.stringify(raw));
+    if (t === "show_verse"      || t === "show verse"      || raw === "閱讀今日經文") return "show_verse";
+    if (t === "change_language" || t === "change language" || raw === "更換語言")     return "change_language";
+    if (t === "english")                                                              return "select_english";
+    if (raw === "中文")                                                                return "select_chinese";
+    if (t === "i_have_read"     || t === "i have read"     || raw === "我已閱讀")     return "i_have_read";
+    return null;
+  }
 
 // ── Lang command detection ─────────────────────────────────────
 type LangCode = "english" | "chinese";
